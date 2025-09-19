@@ -15,6 +15,13 @@ fn main() {
 				name: 'data'
 				description: 'The path of data, default is ./data/'
 				default_value: ['./data/']
+			},
+			cli.Flag {
+				flag: cli.FlagType.int
+				abbrev: "p"
+				name: 'port'
+				description: 'http server port'
+				default_value: ['8080']
 			}
 		]
 	}
@@ -27,17 +34,10 @@ fn run(cmd cli.Command) ! {
 	mut service := core.Service {
 		data_path: data_path
 	}
-	service.setup()
+	service.setup()!
 	defer {service.close() or {
 		panic("Failed to close service")
 	}}
 
-	mut index := service.get_or_create_index("equipment")
-	query := core.Query.eq("eqp_name", "Nucleus")
-	println(index.search_logs(query, fn (line string, tags []core.Tag) TaggingLog {
-		return TaggingLog {
-			log: line
-			tags: tags
-		}
-	})!)
+	
 }

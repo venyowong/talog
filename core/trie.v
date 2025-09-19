@@ -1,7 +1,7 @@
 module core
 
 import arrays
-import linq
+import venyowong.linq
 import sync
 
 pub struct Trie {

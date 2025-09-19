@@ -1,6 +1,6 @@
 module core
 
-import concurrent
+import venyowong.concurrent
 import json
 import linq
 import os

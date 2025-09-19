@@ -1,6 +1,6 @@
 module core
 
-import concurrent
+import venyowong.concurrent
 import os
 
 pub struct Service {
@@ -10,10 +10,10 @@ pub mut:
 	data_path string
 }
 
-pub fn (mut service Service) setup() {
+pub fn (mut service Service) setup() ! {
 	entries := os.ls(service.data_path) or {
-        eprintln("Cannot find sub directories in $service.data_path: $err")
-        return
+		os.mkdir_all(service.data_path)!
+        []string{}
     }
 
 	for entry in entries {
