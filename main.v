@@ -1,8 +1,9 @@
 module main
 
 import cli
-import core
 import os
+import rest
+import core
 
 fn main() {
 	mut app := cli.Command{
@@ -39,5 +40,8 @@ fn run(cmd cli.Command) ! {
 		panic("Failed to close service")
 	}}
 
-	
+	mut rest_app := rest.RestApp {
+		service: &service
+	}
+	rest_app.run_server(cmd.flags.get_int("port")!)
 }

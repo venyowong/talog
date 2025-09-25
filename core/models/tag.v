@@ -1,4 +1,4 @@
-module core
+module models
 
 pub struct Tag {
 pub mut:

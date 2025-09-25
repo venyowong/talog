@@ -1,15 +1,14 @@
-module core
+module models
 
-import arrays
 import venyowong.linq
 import sync
 
 pub struct Trie {
 mut:
-	mutex sync.RwMutex = sync.RwMutex{}
+	mutex sync.RwMutex = sync.RwMutex{} @[json: '-']
 pub mut:
 	char string @[json: Char]
-	nodes []Trie @[json: Nodes]
+	nodes []&Trie @[json: Nodes]
 	buckets map[string]Bucket @[json: Buckets]
 }
 
@@ -56,6 +55,10 @@ pub fn (trie Trie) get_leaves() []string {
 	return leaves
 }
 
+pub fn (trie Trie) is_default() bool {
+	return trie.char.len == 0 && trie.nodes.len == 0 && trie.buckets.len == 0
+}
+
 pub fn (mut trie Trie) remove_bucket(path string, key string) {
 	if path.len == 0 {
 		trie.buckets.delete(key)
@@ -70,13 +73,13 @@ pub fn (mut trie Trie) remove_bucket(path string, key string) {
 	}
 }
 
-fn (mut trie Trie) get_match_node(path string) Trie {
+fn (mut trie Trie) get_match_node(path string) &Trie {
 	ch := path[0..1]
-	return arrays.find_first(trie.nodes, fn [ch] (t Trie) bool {
+	return linq.first(trie.nodes, fn [ch] (t Trie) bool {
 		return t.char == ch
 	}) or { 
 		t := Trie{char: ch}
-		trie.nodes << t
-		return t
+		trie.nodes << &t
+		return &t
 	}
 }

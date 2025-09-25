@@ -1,8 +1,8 @@
-module core
+module models
 
 import arrays
 import crypto.md5
-import linq
+import venyowong.linq
 import os
 
 pub struct Bucket {
