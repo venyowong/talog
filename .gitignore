@@ -24,3 +24,5 @@ bin/
 *.js
 
 data/
+
+logs/

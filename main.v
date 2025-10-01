@@ -23,6 +23,13 @@ fn main() {
 				name: 'port'
 				description: 'http server port'
 				default_value: ['8080']
+			},
+			cli.Flag {
+				flag: cli.FlagType.string
+				abbrev: "h"
+				name: 'host'
+				description: 'http server host'
+				default_value: ['localhost']
 			}
 		]
 	}
@@ -39,9 +46,17 @@ fn run(cmd cli.Command) ! {
 	defer {service.close() or {
 		panic("Failed to close service")
 	}}
+	os.signal_opt(.int, fn [mut service] (signal os.Signal) {
+		service.close() or {
+			panic("Failed to close service")
+		}
+	})!
+	os.signal_opt(.term, fn [mut service] (signal os.Signal) {
+		service.close() or {
+			panic("Failed to close service")
+		}
+	})!
 
-	mut rest_app := rest.RestApp {
-		service: &service
-	}
-	rest_app.run_server(cmd.flags.get_int("port")!)
+	mut rest_app := rest.RestApp.new(&service)
+	rest_app.run_server(cmd.flags.get_string("host")!, cmd.flags.get_int("port")!)!
 }

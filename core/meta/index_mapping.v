@@ -18,4 +18,5 @@ pub mut:
 	name string
 	tag_name string // if tag_name is empty, talog will not index this field
 	format string // if format is not empty, talog will use it to format field and generate index value
+	type string // string/time/number
 }
