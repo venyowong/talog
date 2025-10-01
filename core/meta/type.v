@@ -1,6 +1,7 @@
 module meta
 
 import time
+import venyowong.linq
 
 pub struct DynamicValue {
 mut:
@@ -22,7 +23,7 @@ pub fn DynamicValue.new(type string, value string, is_array bool) !DynamicValue 
 		is_array: is_array
 	}
 	if is_array {
-		result.strs = str.trim_left('[').trim_right(']').split(',')
+		result.strs = result.value.trim_left('[').trim_right(']').split(',')
 	}
 	if type == "time" {
 		if is_array {
@@ -38,9 +39,10 @@ pub fn DynamicValue.new(type string, value string, is_array bool) !DynamicValue 
 				return s.f64()
 			})
 		} else {
-			result.number = time.parse(value)!
+			result.number = result.value.f64()
 		}
 	}
+	return result
 }
 
 pub fn (val1 DynamicValue) compare_to(val2 DynamicValue) !int {
@@ -55,7 +57,7 @@ pub fn (val1 DynamicValue) compare_to(val2 DynamicValue) !int {
 		} else {
 			return -1
 		}
-	} else if (val1.type == "time") {
+	} else if val1.type == "time" {
 		if val1.tim == val2.tim {
 			return 0
 		} else if val1.tim > val2.tim {
@@ -63,7 +65,7 @@ pub fn (val1 DynamicValue) compare_to(val2 DynamicValue) !int {
 		} else {
 			return -1
 		}
-	} else if (val1.type == "number") {
+	} else if val1.type == "number" {
 		if val1.number == val2.number {
 			return 0
 		} else if val1.number > val2.number {

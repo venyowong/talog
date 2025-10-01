@@ -217,45 +217,42 @@ fn generate_query_for_index(mut q query.Query, mut index Index, m meta.IndexMapp
 			if q.ope == query.Symbol.eq || q.ope == query.Symbol.neq {
 				return q
 			}
-			field := arrays.find_first[q](m.fields, fn (f meta.FieldMapping) bool {
-				return f.tag_name == q.key
+			r := unsafe{&q}
+			field := arrays.find_first[meta.FieldMapping](m.fields, fn [r] (f meta.FieldMapping) bool {
+				return f.tag_name == r.key
 			}) or {
 				return error("$q.key is not a tag")
 			}
 
 			mut values := []string{}
-			mut val2 := DynamicValue{}
+			mut val2 := meta.DynamicValue{}
 			if q.ope == query.Symbol.in {
-				val2 = meta.DynamicValue.new(field.type, q.value, true)
+				val2 = meta.DynamicValue.new(field.type, q.value, true)!
 			} else {
-				val2 = meta.DynamicValue.new(field.type, q.value, false)
+				val2 = meta.DynamicValue.new(field.type, q.value, false)!
 			}
 			for value in index.get_tag_values(q.key) {
-				val1 := meta.DynamicValue.new(field.type, value, false)				
+				val1 := meta.DynamicValue.new(field.type, value, false)!				
 				if q.ope == query.Symbol.gt {
-					if val1.compare_to(val2) > 0 {values << value}
+					if val1.compare_to(val2)! > 0 {values << value}
 				} else if q.ope == query.Symbol.gte {
-					if val1.compare_to(val2) >= 0 {values << value}
+					if val1.compare_to(val2)! >= 0 {values << value}
 				} else if q.ope == query.Symbol.lt {
-					if val1.compare_to(val2) < 0 {values << value}
+					if val1.compare_to(val2)! < 0 {values << value}
 				} else if q.ope == query.Symbol.lte {
-					if val1.compare_to(val2) <= 0 {values << value}
+					if val1.compare_to(val2)! <= 0 {values << value}
 				} else if q.ope == query.Symbol.like {
-					if val1.like(val2) {values << value}
+					if val1.like(val2)! {values << value}
 				} else if q.ope == query.Symbol.in {
-					if val1.in(val2) {values << value}
+					if val1.in(val2)! {values << value}
 				}
 			}
 
 			if values.len == 0 {
-				return query.NoneQuery
+				return query.NoneQuery{}
 			}
 
-			mut result := query.BaseQuery {
-				key: q.key
-				ope: query.Symbol.eq
-				value: values[0]
-			}
+			mut result := query.Query.new(q.key, query.Symbol.eq, values[0])
 			for i := 1; i < values.len; i++ {
 				result = result.or(query.BaseQuery {
 					key: q.key
@@ -465,6 +462,7 @@ fn (mut service Service) search_raw_log_with_header(m meta.IndexMapping, query_s
 	mut index := service.get_or_create_index(m.name)
 	mut q := query.Query.parse(query_str)!
 	q = generate_query_for_index(mut q, mut index, m)!
+	println(q)
 	buckets := index.search(q)!
 	mut result := []structs.LogModel{}
 	for bucket in buckets {

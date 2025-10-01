@@ -7,7 +7,7 @@ content-type: application/json
     "log": "[2025-09-12 09:24:32.606 +08:00] [INF] [Nucleus] SECS/GEM EAP: --> [0x000007C9] 'S1F14'\n    <L [2] \n        <B [0] >\n        <L [2] \n            <A [6] '8800FC'>\n            <A [5] '1.0.0'>\n        >\n    >\n.\n",
     "tags": [
         {
-            "label": "SECS",
+            "label": "secs",
             "value": "S1F14"
         }
     ]
@@ -27,15 +27,23 @@ content-type: application/json
         {
             "name": "time",
             "tag_name": "date",
-            "format": "YYYYMMDD"
+            "format": "YYYYMMDD",
+            "type": "time"
         },
         {
             "name": "level",
-            "tag_name": "level"
+            "tag_name": "level",
+            "type": "string"
         },
         {
             "name": "name",
-            "tag_name": "name"
+            "tag_name": "name",
+            "type": "string"
+        },
+        {
+            "name": "secs",
+            "tag_name": "secs",
+            "type": "string"
         }
     ]
 }
@@ -46,4 +54,4 @@ http://localhost:8080/index/mappings
 
 ###
 
-http://localhost:8080/search?name=eqp_simulator&query=SECS%20%3E%20S1F13
+http://localhost:8080/search?name=eqp_simulator&query=secs%20%3E%20S1F14
