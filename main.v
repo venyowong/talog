@@ -1,9 +1,10 @@
 module main
 
 import cli
+import core
 import os
 import rest
-import core
+import zmq
 
 fn main() {
 	mut app := cli.Command{
@@ -18,6 +19,13 @@ fn main() {
 				default_value: ['./data/']
 			},
 			cli.Flag {
+				flag: cli.FlagType.string
+				abbrev: "h"
+				name: 'host'
+				description: 'http server host'
+				default_value: ['localhost']
+			},
+			cli.Flag {
 				flag: cli.FlagType.int
 				abbrev: "p"
 				name: 'port'
@@ -25,11 +33,16 @@ fn main() {
 				default_value: ['26382']
 			},
 			cli.Flag {
-				flag: cli.FlagType.string
-				abbrev: "h"
-				name: 'host'
-				description: 'http server host'
-				default_value: ['localhost']
+				flag: cli.FlagType.int
+				name: 'zmq_workers'
+				description: 'zeromq workers'
+				default_value: ['8']
+			},
+			cli.Flag {
+				flag: cli.FlagType.int
+				name: 'zmq_port'
+				description: 'zeromq host'
+				default_value: ['26383']
 			}
 		]
 	}
@@ -46,6 +59,15 @@ fn run(cmd cli.Command) ! {
 	defer {service.close() or {
 		panic("Failed to close service")
 	}}
+
+	host := cmd.flags.get_string("host")!
+	mut rest_app := rest.RestApp.new(&service)
+	spawn rest_app.run_server(host, cmd.flags.get_int("port")!)
+
+	zmq_port := cmd.flags.get_int("zmq_port")!
+	mut zmq_app := zmq.ZmqApp.run(mut service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)!
+	defer {zmq_app.close()}
+
 	os.signal_opt(.int, fn [mut service] (signal os.Signal) {
 		service.close() or {
 			panic("Failed to close service")
@@ -58,7 +80,4 @@ fn run(cmd cli.Command) ! {
 		}
 		exit(0)
 	})!
-
-	mut rest_app := rest.RestApp.new(&service)
-	rest_app.run_server(cmd.flags.get_string("host")!, cmd.flags.get_int("port")!)!
 }

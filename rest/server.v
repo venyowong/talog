@@ -37,8 +37,8 @@ pub fn (ctx RestContext) get_param(key string) string {
 	return c.value
 }
 
-pub fn RestApp.new(service &core.Service) RestApp {
-	return RestApp {
+pub fn RestApp.new(service &core.Service) &RestApp {
+	return &RestApp {
 		service: service
 		index_controller: &Index {
 			service: service
