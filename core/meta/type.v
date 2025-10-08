@@ -3,6 +3,18 @@ module meta
 import time
 import venyowong.linq
 
+pub enum LogType {
+	raw
+	json
+}
+
+pub fn LogType.parse(s string) ?LogType {
+	t := s.to_lower()
+	if t == "raw" {return LogType.raw}
+	if t == "json" {return LogType.json}
+	return none
+}
+
 pub struct DynamicValue {
 mut:
 	tim time.Time

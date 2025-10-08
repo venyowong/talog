@@ -6,7 +6,7 @@ import time
 pub struct IndexMapping {
 pub mut:
 	name string
-	log_type int @[tag: "log_type"] // 0 log 1 json
+	log_type LogType @[tag: "log_type"]
 	log_header string // header for log
 	log_regex string // regex expression for parsing log
 	fields []FieldMapping

@@ -22,7 +22,7 @@ fn main() {
 				abbrev: "p"
 				name: 'port'
 				description: 'http server port'
-				default_value: ['8080']
+				default_value: ['26382']
 			},
 			cli.Flag {
 				flag: cli.FlagType.string
@@ -50,11 +50,13 @@ fn run(cmd cli.Command) ! {
 		service.close() or {
 			panic("Failed to close service")
 		}
+		exit(0)
 	})!
 	os.signal_opt(.term, fn [mut service] (signal os.Signal) {
 		service.close() or {
 			panic("Failed to close service")
 		}
+		exit(0)
 	})!
 
 	mut rest_app := rest.RestApp.new(&service)

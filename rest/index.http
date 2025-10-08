@@ -1,4 +1,4 @@
-POST http://localhost:8080/index
+POST http://[::1]:26382/index
 content-type: application/json
 
 {
@@ -15,12 +15,12 @@ content-type: application/json
 
 ###
 
-POST http://localhost:8080/index/mapping
+POST http://[::1]:26382/index/mapping
 content-type: application/json
 
 {
     "name": "eqp_simulator",
-    "log_type": 0,
+    "log_type": "raw",
     "log_header": "eqp",
     "log_regex": "\\[(?P<time>[^\\]]*)\\] \\[(?P<level>[^\\]]*)\\] \\[(?P<name>[^\\]]*)\\] (?P<msg>.*)$",
     "fields": [
@@ -50,8 +50,8 @@ content-type: application/json
 
 ###
 
-http://localhost:8080/index/mappings
+http://[::1]:26382/index/mappings
 
 ###
 
-http://localhost:8080/search?name=eqp_simulator&query=secs%20%3E%20S1F14
+http://[::1]:26382/search?name=eqp_simulator&query=secs%20%3E%20S1F13&log_type=raw

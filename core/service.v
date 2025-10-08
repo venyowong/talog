@@ -55,7 +55,7 @@ pub fn (mut service Service) close() ! {
 	}
 }
 
-pub fn (mut service Service) get_mapping(log_type int, name string) !meta.IndexMapping {
+pub fn (mut service Service) get_mapping(log_type meta.LogType, name string) !meta.IndexMapping {
 	mappings := service.get_mappings_by_type(log_type)!
 	return arrays.find_first(mappings, fn [name] (m meta.IndexMapping) bool {
 		return m.name == name
@@ -64,7 +64,7 @@ pub fn (mut service Service) get_mapping(log_type int, name string) !meta.IndexM
 	}
 }
 
-pub fn (mut service Service) get_mappings_by_type(log_type int) ![]meta.IndexMapping {
+pub fn (mut service Service) get_mappings_by_type(log_type meta.LogType) ![]meta.IndexMapping {
 	mut idx := service.get_or_create_index("meta.IndexMapping")
 	mut mappings := idx.search_logs(query.Query.parse("log_type == $log_type")!, fn (line string, _ []structs.Tag) meta.IndexMapping {
 		return json.decode(meta.IndexMapping, line) or {
@@ -92,9 +92,9 @@ pub fn (mut service Service) get_or_create_index(name string) &Index {
 	})
 }
 
-pub fn (mut service Service) index_log(log_type int, name string, tags []structs.Tag, l string) !bool {
+pub fn (mut service Service) index_log(log_type meta.LogType, name string, tags []structs.Tag, l string) !bool {
 	mapping := service.get_mapping(log_type, name) or {return false}
-	if mapping.log_type == 1 {
+	if mapping.log_type == .json {
 		return service.index_json_log(mapping, tags, l)!
 	}
 
@@ -109,7 +109,7 @@ pub fn (mut service Service) mapping[T]() ! {
 	// analyse current mapping
 	mut mapping := meta.IndexMapping {
 		name: T.name
-		log_type: 1
+		log_type: .json
 		mapping_time: time.now()
 	}
 	$for field in T.fields {
@@ -152,7 +152,7 @@ pub fn (mut service Service) check_mapping(mapping meta.IndexMapping) !bool {
 			return false
 		}
 	} else {
-		if mapping.log_type == 1 && mapping.log_header.len > 0 {
+		if mapping.log_type == .json && mapping.log_header.len > 0 {
 			return error("json log can't have a log header")
 		}
 		field := arrays.find_first(mapping.fields, fn (f meta.FieldMapping) bool {
@@ -196,9 +196,9 @@ pub fn (mut service Service) save_log[T](value T) ! {
 	index.push(tags, json.encode(value))!
 }
 
-pub fn (mut service Service) search_logs(log_type int, name string, q string) ![]structs.LogModel {
+pub fn (mut service Service) search_logs(log_type meta.LogType, name string, q string) ![]structs.LogModel {
 	m := service.get_mapping(log_type, name) or {return []structs.LogModel{}}
-	if m.log_type == 1 {
+	if m.log_type == .json {
 		return service.search_json_log(m, q)!
 	}
 
@@ -462,7 +462,6 @@ fn (mut service Service) search_raw_log_with_header(m meta.IndexMapping, query_s
 	mut index := service.get_or_create_index(m.name)
 	mut q := query.Query.parse(query_str)!
 	q = generate_query_for_index(mut q, mut index, m)!
-	println(q)
 	buckets := index.search(q)!
 	mut result := []structs.LogModel{}
 	for bucket in buckets {
