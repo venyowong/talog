@@ -47,6 +47,42 @@ pub fn (mut service Service) setup() ! {
 	service.mapping[meta.IndexMapping]()!
 }
 
+pub fn (mut service Service) check_mapping(mapping meta.IndexMapping) !bool {
+	// get last mapping
+	mappings := service.get_mappings_by_type(mapping.log_type)!
+	last_mapping := arrays.find_first(mappings, fn [mapping] (m meta.IndexMapping) bool {
+		return m.name == mapping.name
+	})
+
+	if last_mapping != none {
+		// check mapping confit
+		if mapping.log_type != last_mapping.log_type {
+			return error("log type of $mapping.name has changed: $last_mapping.log_type -> $mapping.log_type")
+		}
+		if mapping.log_header != last_mapping.log_header {
+			return error("log header of $mapping.name has changed: $last_mapping.log_header -> $mapping.log_header")
+		}
+		if mapping.log_regex == last_mapping.log_regex && linq.except(mapping.fields, last_mapping.fields).len == 0 {
+			return false
+		}
+	} else {
+		if mapping.log_type == .json && mapping.log_header.len > 0 {
+			return error("json log can't have a log header")
+		}
+		field := arrays.find_first(mapping.fields, fn (f meta.FieldMapping) bool {
+			if f.type != "string" && f.type != "time" && f.type != "number" {
+				return true
+			}
+			return false
+		})
+		if field != none {
+			return error("unsupported field type: $field.type")
+		}
+	}
+
+	return true
+}
+
 pub fn (mut service Service) close() ! {
 	service.log.info("Talog service closing...")
 	defer {service.log.flush()}
@@ -133,40 +169,18 @@ pub fn (mut service Service) mapping[T]() ! {
 	}
 }
 
-pub fn (mut service Service) check_mapping(mapping meta.IndexMapping) !bool {
-	// get last mapping
-	mappings := service.get_mappings_by_type(mapping.log_type)!
-	last_mapping := arrays.find_first(mappings, fn [mapping] (m meta.IndexMapping) bool {
-		return m.name == mapping.name
-	})
-
-	if last_mapping != none {
-		// check mapping confit
-		if mapping.log_type != last_mapping.log_type {
-			return error("log type of $mapping.name has changed: $last_mapping.log_type -> $mapping.log_type")
-		}
-		if mapping.log_header != last_mapping.log_header {
-			return error("log header of $mapping.name has changed: $last_mapping.log_header -> $mapping.log_header")
-		}
-		if mapping.log_regex == last_mapping.log_regex && linq.except(mapping.fields, last_mapping.fields).len == 0 {
-			return false
-		}
-	} else {
-		if mapping.log_type == .json && mapping.log_header.len > 0 {
-			return error("json log can't have a log header")
-		}
-		field := arrays.find_first(mapping.fields, fn (f meta.FieldMapping) bool {
-			if f.type != "string" && f.type != "time" && f.type != "number" {
-				return true
-			}
-			return false
-		})
-		if field != none {
-			return error("unsupported field type: $field.type")
-		}
+pub fn parse_log_with_regex(l string, reg string) !map[string]string {
+	mut re := regex.regex_opt(reg)!
+	s, _ := re.match_string(l)
+	if s < 0 {
+		return error("$reg can't match $l")
 	}
 
-	return true
+	mut m := map[string]string{}
+	for name in re.group_map.keys() {
+		m[name] = re.get_group_by_name(l, name)
+	}
+	return m
 }
 
 pub fn (mut service Service) save_log[T](value T) ! {
@@ -226,24 +240,24 @@ fn generate_query_for_index(mut q query.Query, mut index Index, m meta.IndexMapp
 
 			mut values := []string{}
 			mut val2 := meta.DynamicValue{}
-			if q.ope == query.Symbol.in {
+			if q.ope == .in {
 				val2 = meta.DynamicValue.new(field.type, q.value, true)!
 			} else {
 				val2 = meta.DynamicValue.new(field.type, q.value, false)!
 			}
 			for value in index.get_tag_values(q.key) {
 				val1 := meta.DynamicValue.new(field.type, value, false)!				
-				if q.ope == query.Symbol.gt {
+				if q.ope == .gt {
 					if val1.compare_to(val2)! > 0 {values << value}
-				} else if q.ope == query.Symbol.gte {
+				} else if q.ope == .gte {
 					if val1.compare_to(val2)! >= 0 {values << value}
-				} else if q.ope == query.Symbol.lt {
+				} else if q.ope == .lt {
 					if val1.compare_to(val2)! < 0 {values << value}
-				} else if q.ope == query.Symbol.lte {
+				} else if q.ope == .lte {
 					if val1.compare_to(val2)! <= 0 {values << value}
-				} else if q.ope == query.Symbol.like {
+				} else if q.ope == .like {
 					if val1.like(val2)! {values << value}
-				} else if q.ope == query.Symbol.in {
+				} else if q.ope == .in {
 					if val1.in(val2)! {values << value}
 				}
 			}
@@ -252,11 +266,11 @@ fn generate_query_for_index(mut q query.Query, mut index Index, m meta.IndexMapp
 				return query.NoneQuery{}
 			}
 
-			mut result := query.Query.new(q.key, query.Symbol.eq, values[0])
+			mut result := query.Query.new(q.key, .eq, values[0])
 			for i := 1; i < values.len; i++ {
 				result = result.or(query.BaseQuery {
 					key: q.key
-					ope: query.Symbol.eq
+					ope: .eq
 					value: values[i]
 				})
 			}
@@ -413,20 +427,6 @@ fn (mut service Service) index_raw_log(m meta.IndexMapping, tags []structs.Tag, 
 		index.push(tags, l)!
 	}
 	return true
-}
-
-fn parse_log_with_regex(l string, reg string) !map[string]string {
-	mut re := regex.regex_opt(reg)!
-	s, _ := re.match_string(l)
-	if s < 0 {
-		return error("$reg can't match $l")
-	}
-
-	mut m := map[string]string{}
-	for name in re.group_map.keys() {
-		m[name] = re.get_group_by_name(l, name)
-	}
-	return m
 }
 
 fn (mut service Service) search_json_log(m meta.IndexMapping, query_str string) ![]structs.LogModel {
