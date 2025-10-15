@@ -171,7 +171,7 @@ pub fn (mut index Index) save() ! {
 		return
 	}
 
-	index.log.info("Talog index [$index.name] saving...")
+	index.log.debug("Talog index [$index.name] saving...")
 	defer {index.log.flush()}
 	index.safe_file.write_file(index.index_file_path, json.encode(index))!
 }

@@ -129,7 +129,7 @@ pub fn (mut service Service) get_or_create_index(name string) &Index {
 }
 
 pub fn (mut service Service) index_log(log_type meta.LogType, name string, tags []structs.Tag, l string) !bool {
-	mapping := service.get_mapping(log_type, name) or {return false}
+	mapping := service.get_mapping(log_type, name) or {return error("$name has no index mapping")}
 	if mapping.log_type == .json {
 		return service.index_json_log(mapping, tags, l)!
 	}
@@ -157,9 +157,13 @@ pub fn (mut service Service) mapping[T]() ! {
 		if tag != none {
 			field_mapping.tag_name = tag
 		}
-		format := get_attribute(field, "format", "") or {""}
-		if format != "" {
-			field_mapping.format = format
+		index_format := get_attribute(field, "index_format", "") or {""}
+		if index_format.len > 0 {
+			field_mapping.index_format = index_format
+		}
+		parse_format := get_attribute(field, "parse_format", "") or {""}
+		if parse_format.len > 0 {
+			field_mapping.parse_format = parse_format
 		}
 		mapping.fields << field_mapping
 	}
@@ -241,12 +245,12 @@ fn generate_query_for_index(mut q query.Query, mut index Index, m meta.IndexMapp
 			mut values := []string{}
 			mut val2 := meta.DynamicValue{}
 			if q.ope == .in {
-				val2 = meta.DynamicValue.new(field.type, q.value, true)!
+				val2 = meta.DynamicValue.new(field.type, q.value, field.parse_format, true)!
 			} else {
-				val2 = meta.DynamicValue.new(field.type, q.value, false)!
+				val2 = meta.DynamicValue.new(field.type, q.value, field.parse_format, false)!
 			}
 			for value in index.get_tag_values(q.key) {
-				val1 := meta.DynamicValue.new(field.type, value, false)!				
+				val1 := meta.DynamicValue.new(field.type, value, field.parse_format, false)!				
 				if q.ope == .gt {
 					if val1.compare_to(val2)! > 0 {values << value}
 				} else if q.ope == .gte {
@@ -362,10 +366,17 @@ fn (mut service Service) index_json_log(m meta.IndexMapping, tags []structs.Tag,
 		if field.tag_name.len > 0 {
 			label = field.tag_name
 		}
-		if field.format.len > 0 {
-			t := time.parse(value) or {time.Time{}}
-			if t.year > 0 {
-				value = t.custom_format(field.format)
+		if field.type == "time" {
+			mut t := time.Time{}
+			if field.parse_format.len > 0 {
+				t = time.parse_format(value, field.parse_format)!
+			} else {
+				t = time.parse(value)!
+			}
+			if field.index_format.len > 0 {
+				value = t.custom_format(field.index_format)
+			} else {
+				value = t.custom_format("YYYY-MM-DD HH:mm:ss")
 			}
 		}
 		tag_map[label] = value
@@ -403,12 +414,20 @@ fn (mut service Service) index_log_with_regex(m meta.IndexMapping, tags []struct
 		if field.tag_name.len > 0 {
 			label = field.tag_name
 		}
-		if field.format.len > 0 {
-			t := time.parse(value) or {time.Time{}}
-			if t.year > 0 {
-				value = t.custom_format(field.format)
+		if field.type == "time" {
+			mut t := time.Time{}
+			if field.parse_format.len > 0 {
+				t = time.parse_format(value, field.parse_format)!
+			} else {
+				t = time.parse(value)!
+			}
+			if field.index_format.len > 0 {
+				value = t.custom_format(field.index_format)
+			} else {
+				value = t.custom_format("YYYY-MM-DD HH:mm:ss")
 			}
 		}
+		
 		tag_map[label] = value
 	}
 	ts := linq.map_to_array[string, string, structs.Tag](tag_map, 

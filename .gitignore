@@ -28,3 +28,5 @@ data/
 logs/
 
 log.txt
+
+*.wch

@@ -1,0 +1,113 @@
+{
+    "mapping": [
+        {
+            "name": "eqp_simulator",
+            "log_type": "raw",
+            "log_header": "eqp",
+            "log_regex": "\\[(?P<time>[^\\]]*)\\] \\[(?P<level>[^\\]]*)\\] \\[(?P<name>[^\\]]*)\\] (?P<msg>.*)$",
+            "fields": [
+                {
+                    "name": "time",
+                    "type": "string"
+                },
+                {
+                    "name": "level",
+                    "tag_name": "level",
+                    "type": "string"
+                },
+                {
+                    "name": "name",
+                    "tag_name": "name",
+                    "type": "string"
+                },
+                {
+                    "name": "msg",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "eap",
+            "log_type": "raw",
+            "log_header": "eap",
+            "log_regex": "\\[(?P<time>[^\\]]*)\\] \\[(?P<level>[^\\]]*)\\] (?P<msg>.*)$",
+            "fields": [
+                {
+                    "name": "time",
+                    "type": "string"
+                },
+                {
+                    "name": "level",
+                    "tag_name": "level",
+                    "type": "string"
+                },
+                {
+                    "name": "name",
+                    "tag_name": "name",
+                    "type": "string"
+                },
+                {
+                    "name": "msg",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "vlog",
+            "log_type": "raw",
+            "log_regex": "(?P<time>[^ ]*) \\[(?P<level>[^\\]]*)\\] (?P<msg>.*)$",
+            "fields": [
+                {
+                    "name": "time",
+                    "type": "string"
+                },
+                {
+                    "name": "level",
+                    "tag_name": "level",
+                    "type": "string"
+                },
+                {
+                    "name": "msg",
+                    "type": "string"
+                }
+            ]
+        }
+    ],
+    "watch": [
+        {
+            "dirs": [
+                "D:\\Qle.Info.Equipment.Simulator\\logs"
+            ],
+            "index": "eqp_simulator",
+            "rule": {
+                "log_type": "raw",
+                "header_regex": "^\\[(?P<time>[^\\]]+)\\]"
+            }
+        },
+        {
+            "files": [
+                "D:\\repos\\nucleus_eap\\NucleusEap\\bin\\Debug\\net8.0-windows\\logs\\log20250705.txt"
+            ],
+            "index": "eap",
+            "rule": {
+                "log_type": "raw",
+                "header_regex": "^\\[(?P<time>[^\\]]+)\\]"
+            },
+            "tags": [
+                {
+                    "label": "name",
+                    "value": "nucleus"
+                }
+            ]
+        },
+        {
+            "files": [
+                "/home/venyowong/repos/talog/log.txt"
+            ],
+            "index": "vlog",
+            "rule": {
+                "log_type": "raw"
+            }
+        }
+    ]
+}

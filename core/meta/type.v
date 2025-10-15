@@ -28,7 +28,7 @@ pub mut:
 	is_array bool
 }
 
-pub fn DynamicValue.new(type string, value string, is_array bool) !DynamicValue {
+pub fn DynamicValue.new(type string, value string, format string, is_array bool) !DynamicValue {
 	mut result := DynamicValue {
 		type: type
 		value: value
@@ -39,11 +39,19 @@ pub fn DynamicValue.new(type string, value string, is_array bool) !DynamicValue 
 	}
 	if type == "time" {
 		if is_array {
-			result.times = linq.map(result.strs, fn (s string) time.Time {
-				return time.parse(s) or {time.Time{}}
+			result.times = linq.map(result.strs, fn [format] (s string) time.Time {
+				if format.len > 0 {
+					return time.parse_format(s, format) or {return time.Time{}}
+				} else {
+					return time.parse(s) or {return time.Time{}}
+				}
 			})
 		} else {
-			result.tim = time.parse(value)!
+			if format.len > 0 {
+				result.tim = time.parse_format(value, format) or {time.Time{}}
+			} else {
+				result.tim = time.parse(value) or {time.Time{}}
+			}
 		}
 	} else if type == "number" {
 		if is_array {

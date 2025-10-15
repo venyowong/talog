@@ -1,4 +1,4 @@
-POST http://[::1]:26382/index
+POST http://127.0.0.1:26382/index
 content-type: application/json
 
 {
@@ -15,7 +15,7 @@ content-type: application/json
 
 ###
 
-POST http://[::1]:26382/index/mapping
+POST http://127.0.0.1:26382/index/mapping
 content-type: application/json
 
 {
@@ -26,9 +26,7 @@ content-type: application/json
     "fields": [
         {
             "name": "time",
-            "tag_name": "date",
-            "format": "YYYYMMDD",
-            "type": "time"
+            "type": "string"
         },
         {
             "name": "level",
@@ -44,14 +42,18 @@ content-type: application/json
             "name": "secs",
             "tag_name": "secs",
             "type": "string"
+        },
+        {
+            "name": "msg",
+            "type": "string"
         }
     ]
 }
 
 ###
 
-http://[::1]:26382/index/mappings
+http://127.0.0.1:26382/index/mappings
 
 ###
 
-http://[::1]:26382/search?name=eqp_simulator&query=secs%20%3E%20S1F13&log_type=raw
+http://127.0.0.1:26382/search?name=eap&log_type=raw
