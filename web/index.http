@@ -1,4 +1,13 @@
-POST http://127.0.0.1:26382/index
+POST http://127.0.0.1:26382/admin/login
+content-type: application/json
+
+{
+    "pwd": "e10adc3949ba59abbe56e057f20f883e"
+}
+
+###
+
+POST http://127.0.0.1:26382/index/log
 content-type: application/json
 
 {

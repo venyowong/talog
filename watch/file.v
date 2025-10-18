@@ -22,7 +22,7 @@ pub mut:
 	tags []structs.Tag
 }
 
-pub fn watch_by_config(configs []WatchConfig, mut service core.Service) {
+pub fn watch_by_config(configs []WatchConfig, mut indexer Indexer) {
 	mut l := log.Log{}
 	l.set_level(.debug)
 	l.set_full_logpath("./log.txt")
@@ -43,7 +43,7 @@ pub fn watch_by_config(configs []WatchConfig, mut service core.Service) {
 					rule: c.rule
 				}
 				mut r_info := &info
-				spawn r_info.watching(mut service, mut r_l)
+				spawn r_info.watching(mut indexer, mut r_l)
 			}
 			for dir in c.dirs {
 				real_dir := os.real_path(dir)
@@ -59,7 +59,7 @@ pub fn watch_by_config(configs []WatchConfig, mut service core.Service) {
 						rule: c.rule
 					}
 					mut r_info := &info
-					spawn r_info.watching(mut service, mut r_l)
+					spawn r_info.watching(mut indexer, mut r_l)
 				}
 			}
 		}
@@ -67,7 +67,7 @@ pub fn watch_by_config(configs []WatchConfig, mut service core.Service) {
 	}
 }
 
-pub fn (mut info FileInfo) watching(mut service core.Service, mut l log.Log) {
+pub fn (mut info FileInfo) watching(mut indexer Indexer, mut l log.Log) {
 	meta_path := "${info.path}.wch"
 	info2 := json.decode(FileInfo, os.read_file(meta_path) or {""}) or {FileInfo{}}
 	info.last_mtime = info2.last_mtime
@@ -97,7 +97,7 @@ pub fn (mut info FileInfo) watching(mut service core.Service, mut l log.Log) {
 			l.debug("$info.path has $lines.len lines")
 			if info.rule.log_type == .json {
 				for line in lines {
-					service.index_log(.json, info.index, info.tags, line) or {
+					indexer.index_log(.json, info.index, info.tags, line) or {
 						l.warn("$line\nfailed to index log: $err")
 						continue
 					}
@@ -106,7 +106,7 @@ pub fn (mut info FileInfo) watching(mut service core.Service, mut l log.Log) {
 				regex := info.rule.header_regex
 				if regex.len == 0 { // single-line log
 					for line in lines {
-						service.index_log(.raw, info.index, info.tags, line) or {
+						indexer.index_log(.raw, info.index, info.tags, line) or {
 							l.warn("$line\nfailed to index log: $err")
 							continue
 						}
@@ -134,7 +134,7 @@ pub fn (mut info FileInfo) watching(mut service core.Service, mut l log.Log) {
 							} { // new log
 								single_log = single_log.trim_space()
 								if single_log.len > 0 {
-									service.index_log(.raw, info.index, info.tags, single_log) or {
+									indexer.index_log(.raw, info.index, info.tags, single_log) or {
 										l.warn("$single_log\nfailed to index log: $err")
 									}
 								}
@@ -143,7 +143,7 @@ pub fn (mut info FileInfo) watching(mut service core.Service, mut l log.Log) {
 						} else { // new log
 							single_log = single_log.trim_space()
 							if single_log.len > 0 {
-								service.index_log(.raw, info.index, info.tags, single_log) or {
+								indexer.index_log(.raw, info.index, info.tags, single_log) or {
 									l.warn("$single_log\nfailed to index log: $err")
 								}
 							}
@@ -152,7 +152,7 @@ pub fn (mut info FileInfo) watching(mut service core.Service, mut l log.Log) {
 					}
 					single_log = single_log.trim_space()
 					if single_log.len > 0 {
-						service.index_log(.raw, info.index, info.tags, single_log) or {
+						indexer.index_log(.raw, info.index, info.tags, single_log) or {
 							l.warn("$single_log\nfailed to index log: $err")
 						}
 					}

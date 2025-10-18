@@ -7,10 +7,11 @@ import json
 import log
 import net.http
 import os
-import rest
+import web
 import talog
 import watch
-import zmq
+// import zmq
+
 
 fn main() {
 	mut app := cli.Command{
@@ -37,6 +38,14 @@ fn main() {
 				name: 'host'
 				description: 'http server host'
 				default_value: ['localhost']
+			},
+			cli.Flag {
+				flag: cli.FlagType.string
+				abbrev: "m"
+				name: 'mode'
+				description: 'talog run mode: watch/server/all'
+				required: true
+				default_value: ['all']
 			},
 			cli.Flag {
 				flag: cli.FlagType.int
@@ -69,42 +78,64 @@ fn run(cmd cli.Command) ! {
 	l.set_full_logpath("./log.txt")
 	l.log_to_console_too()
 	l.info("talog is running...")
-
-	data_path := cmd.flags.get_string('data')!
-	mut service := core.Service {
-		data_path: data_path
-	}
-	service.setup()!
-	defer {service.close() or {
-		panic("Failed to close service")
-	}}
-	mut r_service := &service
-
-	l.info("saving mapping...")
 	mut config := json.decode(talog.Config, os.read_file(cmd.flags.get_string('config')!)!)!
-	for mut m in config.mapping {
-		extension.mapping(mut service, mut m)
-	}
-
+	mut mode := cmd.flags.get_string("mode")!
+	mode = mode.to_lower()
 	mut threads := []thread{}
 
-	host := cmd.flags.get_string("host")!
-	port := cmd.flags.get_int("port")!
-	mut rest_server := rest.new_server(mut service, host, port)
-	mut r_rest_server := &rest_server
-	threads << spawn r_rest_server.listen_and_serve()
+	if mode == "watch" {
+		mut indexer := watch.HttpIndexer {
+			host: config.server
+		}
+		mut r_indexer := &indexer
+		threads << spawn watch.watch_by_config(config.watch, mut r_indexer)
+	} else {
+		data_path := cmd.flags.get_string('data')!
+		mut service := core.Service {
+			data_path: data_path
+		}
+		service.setup()!
+		mut r_service := &service
+		l.info("saving mapping...")
+		for mut m in config.mapping {
+			extension.mapping(mut service, mut m)
+		}
 
-	threads << spawn watch.watch_by_config(config.watch, mut r_service)
+		host := cmd.flags.get_string("host")!
+		port := cmd.flags.get_int("port")!
+		mut handler := web.HttpHandler {
+			adm_pwd: config.adm_pwd
+			allow_list: config.allow_list
+			jwt_secret: config.jwt_secret
+			service: &service
+		}
+		mut rest_server := http.Server {
+			handler: handler
+			addr: "$host:$port"
+		}
+		mut r_rest_server := &rest_server
+		threads << spawn r_rest_server.listen_and_serve()
 
-	os.signal_opt(.int, fn [mut service, mut rest_server] (signal os.Signal) {
-		elegant_exit(mut service, mut rest_server)
-	})!
-	os.signal_opt(.term, fn [mut service, mut rest_server] (signal os.Signal) {
-		elegant_exit(mut service, mut rest_server)
-	})!
+		if mode == "all" {
+			mut indexer := watch.InnerIndexer {
+				service: service
+			}
+			mut r_indexer := &indexer
+			threads << spawn watch.watch_by_config(config.watch, mut r_indexer)
+		}
 
-	zmq_port := cmd.flags.get_int("zmq_port")!
-	spawn zmq.ZmqApp.run(mut r_service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)
+		$if linux {
+			zmq_port := cmd.flags.get_int("zmq_port")!
+			threads << spawn zmq.ZmqApp.run(mut r_service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)
+		}
+
+		os.signal_opt(.int, fn [mut service, mut rest_server] (signal os.Signal) {
+			elegant_exit(mut service, mut rest_server)
+		})!
+		os.signal_opt(.term, fn [mut service, mut rest_server] (signal os.Signal) {
+			elegant_exit(mut service, mut rest_server)
+		})!
+	}
 
 	threads.wait()
 }

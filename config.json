@@ -1,4 +1,10 @@
 {
+    "adm_pwd": "123456",
+    "allow_list": [
+        "192.168.0.0/16",
+        "127.0.0.1/32"
+    ],
+    "jwt_secret": "7aaf118c",
     "mapping": [
         {
             "name": "eqp_simulator",
@@ -73,6 +79,7 @@
             ]
         }
     ],
+    "server": "http://127.0.0.1:26382",
     "watch": [
         {
             "dirs": [
