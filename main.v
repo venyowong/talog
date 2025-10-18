@@ -10,8 +10,7 @@ import os
 import web
 import talog
 import watch
-// import zmq
-
+import zmq
 
 fn main() {
 	mut app := cli.Command{
@@ -126,7 +125,9 @@ fn run(cmd cli.Command) ! {
 
 		$if linux {
 			zmq_port := cmd.flags.get_int("zmq_port")!
-			threads << spawn zmq.ZmqApp.run(mut r_service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)
+			mut zmq_app := zmq.ZmqApp.run(mut r_service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)
+			threads << spawn zmq_app.proxy()
+			defer {zmq_app.close()}
 		}
 
 		os.signal_opt(.int, fn [mut service, mut rest_server] (signal os.Signal) {

@@ -26,18 +26,28 @@ pub mut:
 	service &core.Service
 }
 
-pub fn ZmqApp.run(mut service core.Service, addr string, workers int) !&ZmqApp {
+pub fn ZmqApp.run(mut service core.Service, addr string, workers int) &ZmqApp {
 	mut l := log.Log{}
 	l.set_level(.info)
 	l.set_full_logpath("./log.txt")
 	l.log_to_console_too()
 	l.info("ZmqApp setup...")
-	ctx := vmq.new_context()
-	frontend := vmq.new_socket(ctx, vmq.SocketType.router)!
-	frontend.bind(addr)!
-	backend := vmq.new_socket(ctx, vmq.SocketType.dealer)!
+	mut ctx := vmq.new_context()
+	mut frontend := vmq.new_socket(ctx, vmq.SocketType.router) or {
+		panic("failed to create frontend socket: $err")
+	}
+	frontend.bind(addr) or {
+		panic("failed to bind frontend socket to $addr: $err")
+	}
+	l.info("zmq frontend socket is binding on $addr")
+	mut backend := vmq.new_socket(ctx, vmq.SocketType.dealer) or {
+		panic("failed to create backend socket: $err")
+	}
 	inproc_addr := "inproc://workers"
-	backend.bind(inproc_addr)!
+	backend.bind(inproc_addr) or {
+		panic("failed to bind backend socket to $inproc_addr: $err")
+	}
+	l.info("zmq backend socket is binding on $inproc_addr")
 	mut app := &ZmqApp {
 		ctx: ctx
 		frontend: frontend
@@ -47,9 +57,15 @@ pub fn ZmqApp.run(mut service core.Service, addr string, workers int) !&ZmqApp {
 	}
 
 	for i := 0; i < workers; i++ {
-		spawn fn [inproc_addr, mut app] (ctx &vmq.Context) ! {
-			worker := vmq.new_socket(ctx, vmq.SocketType.rep)!
-			worker.connect(inproc_addr)!
+		spawn fn [inproc_addr, mut app] (ctx &vmq.Context) {
+			worker := vmq.new_socket(ctx, vmq.SocketType.rep) or {
+				app.log.error("failed to create worker socket: $err")
+				return
+			}
+			worker.connect(inproc_addr) or {
+				app.log.error("worker socket cannot connect to $inproc_addr: $err")
+				return
+			}
 			for {
 				if app.closed {return}
 
@@ -72,16 +88,22 @@ pub fn ZmqApp.run(mut service core.Service, addr string, workers int) !&ZmqApp {
 			}
 		}(ctx)
 	}
-	vmq.proxy(app.frontend, app.backend)!
-
+	
 	return app
 }
 
 pub fn (mut app ZmqApp) close() {
+	app.log.info("ZmqApp is closing...")
 	app.closed = true
 	app.frontend.free()
 	app.backend.free()
 	app.ctx.free()
+}
+
+pub fn (mut app ZmqApp) proxy() {
+	vmq.proxy(app.frontend, app.backend) or {
+		app.log.error("zmq proxy error: $err")
+	}
 }
 
 fn (mut app ZmqApp) handle_req(req Req) !string {
