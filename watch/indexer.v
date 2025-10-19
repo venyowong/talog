@@ -18,7 +18,7 @@ pub mut:
 }
 
 pub fn (mut indexer InnerIndexer) index_log(log_type meta.LogType, name string, tags []structs.Tag, l string) !bool {
-	return indexer.service.index_log(log_type, name, tags, l)!
+	return indexer.service.index_log(log_type, name, tags, true, l)!
 }
 
 pub struct HttpIndexer {

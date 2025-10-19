@@ -8,6 +8,7 @@ pub mut:
 	name string
 	log_type meta.LogType
 	log string
+	parse_log bool
 	tags []structs.Tag
 }
 
@@ -16,5 +17,6 @@ pub mut:
 	name string
 	log_type meta.LogType
 	logs []string
+	parse_log bool
 	tags []structs.Tag
 }

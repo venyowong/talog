@@ -128,22 +128,31 @@ pub fn (mut service Service) get_or_create_index(name string) &Index {
 	})
 }
 
-pub fn (mut service Service) index_log(log_type meta.LogType, name string, tags []structs.Tag, l string) !bool {
+pub fn (mut service Service) index_log(log_type meta.LogType, name string, 
+	tags []structs.Tag, parse_log bool, l string) !bool {
 	mapping := service.get_mapping(log_type, name) or {return error("$name has no index mapping")}
-	if mapping.log_type == .json {
-		return service.index_json_log(mapping, tags, l)!
-	}
+	if parse_log {
+		if mapping.log_type == .json {
+			return service.index_json_log(mapping, tags, l)!
+		}
 
-	if mapping.log_regex.len > 0 {
-		return service.index_log_with_regex(mapping, tags, l)!
+		if mapping.log_regex.len > 0 {
+			return service.index_log_with_regex(mapping, tags, l)!
+		}
 	}
 
 	return service.index_raw_log(mapping, tags, l)!
 }
 
-pub fn (mut service Service) index_logs(log_type meta.LogType, name string, tags []structs.Tag, logs ...string) ! {
-	for l in logs {
-		service.index_log(log_type, name, tags, l)!
+pub fn (mut service Service) index_logs(log_type meta.LogType, name string, 
+	tags []structs.Tag, parse_log bool, logs ...string) ! {
+	if parse_log {
+		for l in logs {
+			service.index_log(log_type, name, tags, true, l)!
+		}
+	} else {
+		mapping := service.get_mapping(log_type, name) or {return error("$name has no index mapping")}
+		service.index_raw_log(mapping, tags, ...logs)!
 	}
 }
 
@@ -446,12 +455,14 @@ fn (mut service Service) index_log_with_regex(m meta.IndexMapping, tags []struct
 	return service.index_raw_log(m, ts, l)!
 }
 
-fn (mut service Service) index_raw_log(m meta.IndexMapping, tags []structs.Tag, l string) !bool {
+fn (mut service Service) index_raw_log(m meta.IndexMapping, tags []structs.Tag, logs ...string) !bool {
 	mut index := service.get_or_create_index(m.name)
 	if m.log_header.len > 0 {
-		index.push(tags, "$m.log_header $l")!
+		index.push(tags, ...linq.map(logs, fn [m] (l string) string {
+			return "$m.log_header $l"
+		}))!
 	} else {
-		index.push(tags, l)!
+		index.push(tags, ...logs)!
 	}
 	return true
 }
