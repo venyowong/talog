@@ -11,3 +11,10 @@ pub mut:
 	tags []structs.Tag
 }
 
+pub struct IndexLogsReq {
+pub mut:
+	name string
+	log_type meta.LogType
+	logs []string
+	tags []structs.Tag
+}

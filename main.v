@@ -10,7 +10,7 @@ import os
 import web
 import talog
 import watch
-import zmq
+// import zmq
 
 fn main() {
 	mut app := cli.Command{
@@ -94,7 +94,6 @@ fn run(cmd cli.Command) ! {
 			data_path: data_path
 		}
 		service.setup()!
-		mut r_service := &service
 		l.info("saving mapping...")
 		for mut m in config.mapping {
 			extension.mapping(mut service, mut m)
@@ -123,12 +122,12 @@ fn run(cmd cli.Command) ! {
 			threads << spawn watch.watch_by_config(config.watch, mut r_indexer)
 		}
 
-		$if linux {
-			zmq_port := cmd.flags.get_int("zmq_port")!
-			mut zmq_app := zmq.ZmqApp.run(mut r_service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)
-			threads << spawn zmq_app.proxy()
-			defer {zmq_app.close()}
-		}
+		// $if linux {
+		// 	zmq_port := cmd.flags.get_int("zmq_port")!
+		// 	mut zmq_app := zmq.ZmqApp.run(mut r_service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)
+		// 	threads << spawn zmq_app.proxy()
+		// 	defer {zmq_app.close()}
+		// }
 
 		os.signal_opt(.int, fn [mut service, mut rest_server] (signal os.Signal) {
 			elegant_exit(mut service, mut rest_server)

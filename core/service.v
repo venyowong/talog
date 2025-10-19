@@ -141,6 +141,12 @@ pub fn (mut service Service) index_log(log_type meta.LogType, name string, tags 
 	return service.index_raw_log(mapping, tags, l)!
 }
 
+pub fn (mut service Service) index_logs(log_type meta.LogType, name string, tags []structs.Tag, logs ...string) ! {
+	for l in logs {
+		service.index_log(log_type, name, tags, l)!
+	}
+}
+
 pub fn (mut service Service) mapping[T]() ! {
 	// analyse current mapping
 	mut mapping := meta.IndexMapping {
@@ -354,7 +360,7 @@ fn (mut service Service) index_json_log(m meta.IndexMapping, tags []structs.Tag,
 		fn (t structs.Tag) string {return t.label}, fn (t structs.Tag) string {return t.value})
 	for key in obj_map.keys() {
 		mut label := key
-		mut value := tag_map[key].str()
+		mut value := obj_map[key] or {json2.Any{}}.str()
 		if key !in field_map {
 			continue
 		}
@@ -362,10 +368,11 @@ fn (mut service Service) index_json_log(m meta.IndexMapping, tags []structs.Tag,
 		if field.tag_name.len <= 0 {
 			continue
 		}
-
 		if field.tag_name.len > 0 {
 			label = field.tag_name
 		}
+		if label in tag_map {continue}
+
 		if field.type == "time" {
 			mut t := time.Time{}
 			if field.parse_format.len > 0 {
@@ -410,10 +417,11 @@ fn (mut service Service) index_log_with_regex(m meta.IndexMapping, tags []struct
 		if field.tag_name.len <= 0 {
 			continue
 		}
-
 		if field.tag_name.len > 0 {
 			label = field.tag_name
 		}
+		if label in tag_map {continue}
+
 		if field.type == "time" {
 			mut t := time.Time{}
 			if field.parse_format.len > 0 {

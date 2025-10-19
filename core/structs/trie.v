@@ -12,20 +12,22 @@ pub mut:
 	buckets map[string]Bucket @[json: Buckets]
 }
 
-pub fn (mut trie Trie) append(path string, bucket Bucket) {
+pub fn (mut trie Trie) append(path string, bucket Bucket) bool {
 	trie.mutex.lock()
 	defer {trie.mutex.unlock()}
 
 	if path.len == 0 {
+		if trie.buckets[bucket.key] == bucket {return false}
+
 		trie.buckets[bucket.key] = bucket
-		return
+		return true
 	}
 
 	mut node := trie.get_match_node(path)
 	if path.len > 1 {
-		node.append(path[1..], bucket)
+		return node.append(path[1..], bucket)
 	} else {
-		node.append("", bucket)
+		return node.append("", bucket)
 	}
 }
 

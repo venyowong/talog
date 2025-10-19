@@ -53,9 +53,7 @@ fn (h HttpHandler) check_request_auth(req http.Request) bool {
 }
 
 fn create_response(req http.Request, status http.Status, body string, content_type string) http.Response {
-	mut res := http.Response {
-		header: req.header
-	}
+	mut res := http.Response{}
 	res.header.set(.content_type, content_type)
 	res.set_status(status)
 	res.set_version(req.version)
@@ -65,9 +63,7 @@ fn create_response(req http.Request, status http.Status, body string, content_ty
 }
 
 fn create_bytes_response(req http.Request, status http.Status, body []u8, content_type string) http.Response {
-	mut res := http.Response {
-		header: req.header
-	}
+	mut res := http.Response{}
 	res.header.set(.content_type, content_type)
 	res.set_status(status)
 	res.set_version(req.version)
@@ -94,7 +90,7 @@ fn get_mime_type(file_path string) string {
 }
 
 fn (mut h HttpHandler) handle_admin(req http.Request, url urllib.URL) http.Response {
-	if url.path.starts_with("/admin/login") {
+	if url.path == "/admin/login" {
 		hash := md5_hash(h.adm_pwd) or {
 			return create_response(req, .internal_server_error, 
 				'exception raised when hashing password: ${err}', "text/plain")
@@ -128,12 +124,17 @@ fn (mut h HttpHandler) handle_index(req http.Request, url urllib.URL) http.Respo
 	}
 	if url.path.starts_with("/index/mappings") {
 		return create_response(req, .ok, extension.get_mappings(mut h.service), "application/json")
-	} else if url.path.starts_with("/index/log") {
+	} else if url.path == "/index/log" {
 		mut r := json.decode(models.IndexLogReq, req.data) or {
 			return create_response(req, .bad_request, "request data is not json", "text/plain")
 		}
 		return create_response(req, .ok, extension.index_log(mut h.service, r), "application/json")
-	} else if url.path.starts_with("/index/mapping") {
+	} else if url.path == "/index/logs" {
+		mut r := json.decode(models.IndexLogsReq, req.data) or {
+			return create_response(req, .bad_request, "request data is not json", "text/plain")
+		}
+		return create_response(req, .ok, extension.index_logs(mut h.service, r), "application/json")
+	} else if url.path == "/index/mapping" {
 		mut m := json.decode(meta.IndexMapping, req.data) or {
 			return create_response(req, .bad_request, "request data is not json", "text/plain")
 		}

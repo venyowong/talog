@@ -65,4 +65,4 @@ http://127.0.0.1:26382/index/mappings
 
 ###
 
-http://127.0.0.1:26382/search?name=eap&log_type=raw
+http://127.0.0.1:26382/search/logs?name=final&log_type=json&query=fund_code+%3d%3d+007540

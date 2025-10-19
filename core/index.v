@@ -5,6 +5,7 @@ import log
 import structs
 import os
 import sync
+import time
 import venyowong.concurrent
 import venyowong.linq
 import venyowong.query
@@ -110,10 +111,8 @@ pub fn (mut index Index) get_tag_values(label string) []string {
 pub fn (mut index Index) push(tags []structs.Tag, logs ...string) ! {
 	index.mutex.lock()
 	defer {index.mutex.unlock()}
-	index.need_save = true
 	index.wg.add(1)
 	spawn index.flush()
-	defer {index.wg.done()}
 
 	bucket := structs.Bucket.new(index.name, index.path, tags)!
 	index.buckets[bucket.key] = bucket
@@ -126,8 +125,11 @@ pub fn (mut index Index) push(tags []structs.Tag, logs ...string) ! {
 		} else {
 			trie = unsafe{index.tries[tag.label]}
 		}
-		trie.append(tag.value, bucket)
+		if trie.append(tag.value, bucket) {
+			index.need_save = true
+		}
 	}
+	index.wg.done()
 }
 
 pub fn (mut index Index) remove_bucket(key string) ! {
@@ -172,7 +174,6 @@ pub fn (mut index Index) save() ! {
 	}
 
 	index.log.debug("Talog index [$index.name] saving...")
-	defer {index.log.flush()}
 	index.safe_file.write_file(index.index_file_path, json.encode(index))!
 }
 
@@ -239,6 +240,7 @@ pub fn (mut index Index) search_logs[T](q query.Query, map_log fn (line string, 
 }
 
 fn (mut index Index) flush() {
+	time.sleep(100 * time.millisecond)
 	index.wg.wait()
 	if !index.need_save {
 		return
