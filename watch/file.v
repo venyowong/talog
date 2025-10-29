@@ -6,6 +6,7 @@ import core.structs
 import log
 import json
 import os
+import regex
 import time
 import venyowong.concurrent
 import venyowong.file
@@ -28,46 +29,47 @@ pub fn watch_by_config(configs []WatchConfig, mut indexer Indexer) {
 	l.set_full_logpath("./log.txt")
 	l.log_to_console_too()
 	l.info("file watcher setup...")
-	mut r_l := &l
-	watching := []string{}
+	mut list := []string{}
 	for {
 		for c in configs {
-			for f in c.files {
-				path := os.real_path(f)
-				if path in watching {continue}
-
-				mut info := FileInfo {
-					path: path
-					index: c.index
-					tags: c.tags
-					rule: c.rule
-				}
-				mut r_info := &info
-				spawn r_info.watching(mut indexer, mut r_l)
-			}
-			for dir in c.dirs {
-				real_dir := os.real_path(dir)
-				files := os.ls(real_dir) or {[]string{}}
-				for f in files {
-					path := os.real_path(f)
-					if path in watching {continue}
-
-					mut info := FileInfo {
-						path: path
-						index: c.index
-						tags: c.tags
-						rule: c.rule
-					}
-					mut r_info := &info
-					spawn r_info.watching(mut indexer, mut r_l)
-				}
+			for p in c.paths {
+				watch(mut indexer, p, mut list, c.index, c.tags, c.file_name_regex, c.rule, mut l)
 			}
 		}
 		time.sleep(5 * time.second)
 	}
 }
 
-pub fn (mut info FileInfo) watching(mut indexer Indexer, mut l log.Log) {
+fn watch(mut indexer Indexer, p string, mut list []string, index string, tags []structs.Tag, 
+	reg string, rule LogRule, mut l log.Log) {
+	path := os.real_path(p)
+	if os.is_dir(path) {
+		children := os.ls(path) or {[]string{}}
+		for child in children {
+			watch(mut indexer, os.join_path(path, child), mut list, index, tags, reg, rule, mut l)
+		}
+	} else {
+		if path in list {return}
+		file_name := os.file_name(path)
+		mut re := regex.regex_opt(reg) or {return}
+		s, _ := re.match_string(file_name)
+		if s < 0 {
+			return
+		}
+
+		mut info := FileInfo {
+			path: path
+			index: index
+			tags: tags
+			rule: rule
+		}
+		mut r_info := &info
+		spawn r_info.watching(mut indexer, mut l)
+		list << path
+	}
+}
+
+fn (mut info FileInfo) watching(mut indexer Indexer, mut l log.Log) {
 	meta_path := "${info.path}.wch"
 	info2 := json.decode(FileInfo, os.read_file(meta_path) or {""}) or {FileInfo{}}
 	info.last_mtime = info2.last_mtime
@@ -103,8 +105,8 @@ pub fn (mut info FileInfo) watching(mut indexer Indexer, mut l log.Log) {
 					}
 				}
 			} else {
-				regex := info.rule.header_regex
-				if regex.len == 0 { // single-line log
+				reg := info.rule.header_regex
+				if reg.len == 0 { // single-line log
 					for line in lines {
 						indexer.index_log(.raw, info.index, info.tags, line) or {
 							l.warn("$line\nfailed to index log: $err")
@@ -115,7 +117,7 @@ pub fn (mut info FileInfo) watching(mut indexer Indexer, mut l log.Log) {
 					mut single_log := ""
 					for lin in lines {
 						line := util.skip_bom(lin)
-						m := core.parse_log_with_regex(line, regex) or {
+						m := core.parse_log_with_regex(line, reg) or {
 							// not matched, this line is not a new log
 							single_log += "\n$line"
 							continue
@@ -160,6 +162,7 @@ pub fn (mut info FileInfo) watching(mut indexer Indexer, mut l log.Log) {
 			}
 			info.last_mtime = increment.last_mtime
 			info.next_pos = increment.next_pos
+			l.debug("saving $meta_path ...")
 			os.write_file(meta_path, json.encode(info)) or {
 				l.warn("failed to write file $meta_path: $err")
 			}

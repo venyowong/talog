@@ -4,9 +4,9 @@ import core.structs
 
 pub struct WatchConfig {
 pub mut:
-	dirs []string
-	files []string
+	file_name_regex string
 	index string
+	paths []string
 	rule LogRule
 	tags []structs.Tag
 }

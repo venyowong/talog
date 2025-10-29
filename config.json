@@ -60,16 +60,24 @@
         },
         {
             "name": "vlog",
+            "log_type": "raw"
+        },
+        {
+            "name": "old_eap",
             "log_type": "raw",
-            "log_regex": "(?P<time>[^ ]*) \\[(?P<level>[^\\]]*)\\] (?P<msg>.*)$",
+            "log_header": "old_eap",
+            "log_regex": "(?P<time>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}),\\d{3} (?P<msg>.*)",
             "fields": [
                 {
                     "name": "time",
-                    "type": "string"
+                    "tag_name": "date",
+                    "type": "time",
+                    "index_format": "YYYYMMDD",
+                    "parse_format": "YYYY-MM-DD HH:mm:ss"
                 },
                 {
-                    "name": "level",
-                    "tag_name": "level",
+                    "name": "program",
+                    "tag_name": "program",
                     "type": "string"
                 },
                 {
@@ -82,39 +90,15 @@
     "server": "http://127.0.0.1:26382",
     "watch": [
         {
-            "dirs": [
-                "D:\\Qle.Info.Equipment.Simulator\\logs"
+            "file_name_regex": "log\\d{8}\\.txt$",
+            "paths": [
+                "D:\\Qle.Info.Equipment.Simulator\\logs\\Nucleus"
             ],
             "index": "eqp_simulator",
             "rule": {
                 "log_type": "raw",
-                "header_regex": "^\\[(?P<time>[^\\]]+)\\]"
-            }
-        },
-        {
-            "files": [
-                "D:\\repos\\nucleus_eap\\NucleusEap\\bin\\Debug\\net8.0-windows\\logs\\log20250705.txt"
-            ],
-            "index": "eap",
-            "rule": {
-                "log_type": "raw",
-                "header_regex": "^\\[(?P<time>[^\\]]+)\\]"
-            },
-            "tags": [
-                {
-                    "label": "name",
-                    "value": "nucleus"
-                }
-            ]
-        },
-        {
-            "files": [
-                "/home/venyowong/repos/talog/log.txt"
-            ],
-            "index": "vlog",
-            "rule": {
-                "log_type": "raw"
+                "header_regex": "^\\[(?P<time>[^\\]]*)\\]"
             }
         }
     ]
-}
+} 

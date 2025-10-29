@@ -2,20 +2,20 @@ module main
 
 import cli
 import core
-import extension
+import core.meta
 import json
 import log
 import net.http
 import os
 import web
 import talog
+import time
 import watch
-// import zmq
 
 fn main() {
 	mut app := cli.Command{
 		name:        'v.talog'
-		description: 'A local tagging log solution that supports rich communication protocols'
+		description: 'A tiny and simple log solution, talog tag logs to store data in a simple way, so it can be quickly queried'
 		execute:     run
 		flags: [
 			cli.Flag {
@@ -28,14 +28,14 @@ fn main() {
 			cli.Flag {
 				flag: cli.FlagType.string
 				name: 'data'
-				description: 'The path of data, default is ./data/'
+				description: 'The path of data, default value is ./data/'
 				default_value: ['./data/']
 			},
 			cli.Flag {
 				flag: cli.FlagType.string
 				abbrev: "h"
 				name: 'host'
-				description: 'http server host'
+				description: 'http server host, default value is localhost',
 				default_value: ['localhost']
 			},
 			cli.Flag {
@@ -50,20 +50,8 @@ fn main() {
 				flag: cli.FlagType.int
 				abbrev: "p"
 				name: 'port'
-				description: 'http server port'
+				description: 'http server port, default value is 26382'
 				default_value: ['26382']
-			},
-			cli.Flag {
-				flag: cli.FlagType.int
-				name: 'zmq_workers'
-				description: 'zeromq workers'
-				default_value: ['8']
-			},
-			cli.Flag {
-				flag: cli.FlagType.int
-				name: 'zmq_port'
-				description: 'zeromq host'
-				default_value: ['26383']
 			}
 		]
 	}
@@ -83,7 +71,7 @@ fn run(cmd cli.Command) ! {
 	mut threads := []thread{}
 
 	if mode == "watch" {
-		mut indexer := watch.HttpIndexer {
+		mut indexer := watch.Indexer {
 			host: config.server
 		}
 		mut r_indexer := &indexer
@@ -96,7 +84,7 @@ fn run(cmd cli.Command) ! {
 		service.setup()!
 		l.info("saving mapping...")
 		for mut m in config.mapping {
-			extension.mapping(mut service, mut m)
+			mapping(mut service, mut m)!
 		}
 
 		host := cmd.flags.get_string("host")!
@@ -115,19 +103,12 @@ fn run(cmd cli.Command) ! {
 		threads << spawn r_rest_server.listen_and_serve()
 
 		if mode == "all" {
-			mut indexer := watch.InnerIndexer {
+			mut indexer := watch.Indexer {
 				service: service
 			}
 			mut r_indexer := &indexer
 			threads << spawn watch.watch_by_config(config.watch, mut r_indexer)
 		}
-
-		// $if linux {
-		// 	zmq_port := cmd.flags.get_int("zmq_port")!
-		// 	mut zmq_app := zmq.ZmqApp.run(mut r_service, "tcp://$host:$zmq_port", cmd.flags.get_int("zmq_workers")!)
-		// 	threads << spawn zmq_app.proxy()
-		// 	defer {zmq_app.close()}
-		// }
 
 		os.signal_opt(.int, fn [mut service, mut rest_server] (signal os.Signal) {
 			elegant_exit(mut service, mut rest_server)
@@ -146,4 +127,11 @@ fn elegant_exit(mut service core.Service, mut rest_server http.Server) {
 	}
 	rest_server.stop()
 	exit(0)
+}
+
+fn mapping(mut service core.Service, mut m meta.IndexMapping) ! {
+	if service.check_mapping(m)! {
+		m.mapping_time = time.now()
+		service.save_log(m)
+	}
 }

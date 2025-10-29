@@ -28,7 +28,11 @@ pub fn (mut service Service) setup() ! {
         []string{}
     }
 
+	$if prod {
 	service.log.set_level(.info)
+	} $else {
+		service.log.set_level(.debug)
+	}
 	service.log.set_full_logpath("./log.txt")
 	service.log.log_to_console_too()
 	defer {service.log.flush()}
@@ -141,7 +145,7 @@ pub fn (mut service Service) index_log(log_type meta.LogType, name string,
 		}
 	}
 
-	return service.index_raw_log(mapping, tags, l)!
+	return service.index_raw_log(mapping, tags, l)
 }
 
 pub fn (mut service Service) index_logs(log_type meta.LogType, name string, 
@@ -152,7 +156,7 @@ pub fn (mut service Service) index_logs(log_type meta.LogType, name string,
 		}
 	} else {
 		mapping := service.get_mapping(log_type, name) or {return error("$name has no index mapping")}
-		service.index_raw_log(mapping, tags, ...logs)!
+		service.index_raw_log(mapping, tags, ...logs)
 	}
 }
 
@@ -184,7 +188,7 @@ pub fn (mut service Service) mapping[T]() ! {
 	}
 
 	if service.check_mapping(mapping)! {
-		service.save_log(mapping)!
+		service.save_log(mapping)
 	}
 }
 
@@ -202,7 +206,7 @@ pub fn parse_log_with_regex(l string, reg string) !map[string]string {
 	return m
 }
 
-pub fn (mut service Service) save_log[T](value T) ! {
+pub fn (mut service Service) save_log[T](value T) {
 	mut tags := []structs.Tag{}
 	$for field in T.fields {
 		tag := get_attribute(field, "tag", field.name)
@@ -210,7 +214,7 @@ pub fn (mut service Service) save_log[T](value T) ! {
 			mut label := tag
 			mut value_str := ""
 			$if field.typ is time.Time {
-				format := get_attribute(field, "format", "") or {""}
+				format := get_attribute(field, "index_format", "") or {""}
 				if format != "" {
 					value_str = value.$(field.name).custom_format(format)
 				} else {
@@ -226,20 +230,23 @@ pub fn (mut service Service) save_log[T](value T) ! {
 		}
 	}
 	mut index := service.get_or_create_index(T.name)
-	index.push(tags, json.encode(value))!
+	index.push(tags, json.encode(value))
 }
 
 pub fn (mut service Service) search_logs(log_type meta.LogType, name string, q string) ![]structs.LogModel {
 	m := service.get_mapping(log_type, name) or {return []structs.LogModel{}}
+	mut result := []structs.LogModel{}
+	start := time.now().unix_milli()
 	if m.log_type == .json {
-		return service.search_json_log(m, q)!
+		result = service.search_json_log(m, q)!
+	} else if m.log_header.len > 0 {
+		result = service.search_raw_log_with_header(m, q)!
+	} else {
+		result = service.search_raw_log(m, q)!
 	}
-
-	if m.log_header.len > 0 {
-		return service.search_raw_log_with_header(m, q)!
-	}
-
-	return service.search_raw_log(m, q)!
+	elapsed := time.now().unix_milli() - start
+	service.log.debug("search $name logs by $q, total logs: $result.len, elapsed: $elapsed")
+	return result
 }
 
 fn generate_query_for_index(mut q query.Query, mut index Index, m meta.IndexMapping) !query.Query {
@@ -319,33 +326,44 @@ fn get_attribute(field FieldData, key string, default_value string) ?string {
 }
 
 fn get_field_type(field FieldData) string {
-	$if field.typ is time.Time {
+	if field.typ == typeof[time.Time]().idx {
 		return "time"
-	} $else $if field.typ is u8 {
-		return "number"
-	} $else $if field.typ is u16 {
-		return "number"
-	} $else $if field.typ is u32 {
-		return "number"
-	} $else $if field.typ is u64 {
-		return "number"
-	} $else $if field.typ is i8 {
-		return "number"
-	} $else $if field.typ is i16 {
-		return "number"
-	} $else $if field.typ is i32 {
-		return "number"
-	} $else $if field.typ is int {
-		return "number"
-	} $else $if field.typ is i64 {
-		return "number"
-	} $else $if field.typ is f32 {
-		return "number"
-	} $else $if field.typ is f64 {
-		return "number"
-	} $else {
-		return "string"
 	}
+	if field.typ == typeof[u8]().idx {
+		return "number"
+	}
+	if field.typ == typeof[u16]().idx {
+		return "number"
+	}
+	if field.typ == typeof[u32]().idx {
+		return "number"
+	}
+	if field.typ == typeof[u64]().idx {
+		return "number"
+	}
+	if field.typ == typeof[i8]().idx {
+		return "number"
+	}
+	if field.typ == typeof[i16]().idx {
+		return "number"
+	}
+	if field.typ == typeof[i32]().idx {
+		return "number"
+	}
+	if field.typ == typeof[int]().idx {
+		return "number"
+	}
+	if field.typ == typeof[i64]().idx {
+		return "number"
+	}
+	if field.typ == typeof[f32]().idx {
+		return "number"
+	}
+	if field.typ == typeof[f64]().idx {
+		return "number"
+	}
+
+	return "string"
 }
 
 fn group_mappings(mut mappings []meta.IndexMapping) []meta.IndexMapping {
@@ -360,7 +378,7 @@ fn group_mappings(mut mappings []meta.IndexMapping) []meta.IndexMapping {
 
 fn (mut service Service) index_json_log(m meta.IndexMapping, tags []structs.Tag, l string) !bool {
 	obj := json2.decode[json2.Any](l) or {
-		return service.index_raw_log(m, tags, l)! // if log is not json format, index it as raw log
+		return service.index_raw_log(m, tags, l) // if log is not json format, index it as raw log
 	}
 	obj_map := obj.as_map()
 	field_map := linq.to_map[meta.FieldMapping, string, meta.FieldMapping](m.fields, 
@@ -403,13 +421,13 @@ fn (mut service Service) index_json_log(m meta.IndexMapping, tags []structs.Tag,
 			value: v
 		}})
 	mut index := service.get_or_create_index(m.name)
-	index.push(ts, l)!
+	index.push(ts, l)
 	return true
 }
 
 fn (mut service Service) index_log_with_regex(m meta.IndexMapping, tags []structs.Tag, l string) !bool {
 	group_map := parse_log_with_regex(l, m.log_regex) or { // if log not match regex, index it as raw log
-		return service.index_raw_log(m, tags, l)!
+		return service.index_raw_log(m, tags, l)
 	}
 
 	field_map := linq.to_map[meta.FieldMapping, string, meta.FieldMapping](m.fields, 
@@ -452,17 +470,17 @@ fn (mut service Service) index_log_with_regex(m meta.IndexMapping, tags []struct
 			label: k
 			value: v
 		}})
-	return service.index_raw_log(m, ts, l)!
+	return service.index_raw_log(m, ts, l)
 }
 
-fn (mut service Service) index_raw_log(m meta.IndexMapping, tags []structs.Tag, logs ...string) !bool {
+fn (mut service Service) index_raw_log(m meta.IndexMapping, tags []structs.Tag, logs ...string) bool {
 	mut index := service.get_or_create_index(m.name)
 	if m.log_header.len > 0 {
 		index.push(tags, ...linq.map(logs, fn [m] (l string) string {
 			return "$m.log_header $l"
-		}))!
+		}))
 	} else {
-		index.push(tags, ...logs)!
+		index.push(tags, ...logs)
 	}
 	return true
 }
@@ -500,7 +518,10 @@ fn (mut service Service) search_raw_log_with_header(m meta.IndexMapping, query_s
 	mut index := service.get_or_create_index(m.name)
 	mut q := query.Query.parse(query_str)!
 	q = generate_query_for_index(mut q, mut index, m)!
+	mut start := time.now().unix_milli()
 	buckets := index.search(q)!
+	mut elapsed := time.now().unix_milli() - start
+	service.log.debug("search $m.name buckets by $query_str, total buckets: $buckets.len, elapsed: $elapsed")
 	mut result := []structs.LogModel{}
 	for bucket in buckets {
 		logs := index.safe_file.read_by_line[string](bucket.file, fn (line string) ?string {
@@ -521,7 +542,7 @@ fn (mut service Service) search_raw_log_with_header(m meta.IndexMapping, query_s
 				result << structs.LogModel {
 					log: temp
 					tags: bucket.tags
-					data: json2.decode[json2.Any](json2.encode(d))!
+					data: json2.decode[json2.Any](json2.encode(d)) or {json2.Any{}}
 				}
 			}
 
@@ -535,7 +556,7 @@ fn (mut service Service) search_raw_log_with_header(m meta.IndexMapping, query_s
 			result << structs.LogModel {
 				log: temp
 				tags: bucket.tags
-				data: json2.decode[json2.Any](json2.encode(d))!
+				data: json2.decode[json2.Any](json2.encode(d)) or {json2.Any{}}
 			}
 		}
 	}

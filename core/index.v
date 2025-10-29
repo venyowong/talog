@@ -108,15 +108,24 @@ pub fn (mut index Index) get_tag_values(label string) []string {
 	return trie.get_leaves()
 }
 
-pub fn (mut index Index) push(tags []structs.Tag, logs ...string) ! {
+pub fn (mut index Index) push(tags []structs.Tag, logs ...string) {
 	index.mutex.lock()
-	defer {index.mutex.unlock()}
 	index.wg.add(1)
 	spawn index.flush()
+	defer {
+		index.wg.done()
+		index.mutex.unlock()
+	}
 
-	bucket := structs.Bucket.new(index.name, index.path, tags)!
+	bucket := structs.Bucket.new(index.name, index.path, tags) or {
+		index.log.error("failed to new bucket $index.name $index.path $tags")
+		return
+	}
 	index.buckets[bucket.key] = bucket
-	index.safe_file.append(bucket.file, ...logs)!
+	index.safe_file.append(bucket.file, ...logs) or {
+		index.log.error("failed to append logs to file $bucket.file")
+		return
+	}
 
 	for tag in tags {
 		mut trie := &structs.Trie{}
@@ -129,7 +138,6 @@ pub fn (mut index Index) push(tags []structs.Tag, logs ...string) ! {
 			index.need_save = true
 		}
 	}
-	index.wg.done()
 }
 
 pub fn (mut index Index) remove_bucket(key string) ! {
@@ -241,23 +249,24 @@ pub fn (mut index Index) search_logs[T](q query.Query, map_log fn (line string, 
 
 fn (mut index Index) flush() {
 	time.sleep(100 * time.millisecond)
+	index.log.debug("$index.name wg waiting...")
 	index.wg.wait()
+	index.log.debug("$index.name wg passed")
 	if !index.need_save {
 		return
 	}
 	// wait group is all done, this thread can hold write lock
 	index.mutex.lock()
+	defer {index.mutex.unlock()}
+	index.log.debug("$index.name flush lock...")
 	if !index.need_save {
 		return
 	}
 
 	index.save() or {
 		index.log.warn("failed to save index $index.name: $err")
-		defer {index.log.flush()}
-		index.mutex.unlock()
 		return
 	}
 
 	index.need_save = false
-	index.mutex.unlock()
 }

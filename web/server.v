@@ -1,8 +1,9 @@
 module web
 
+import compress.deflate
+import compress.gzip
 import core
 import core.meta
-import extension
 import json
 import models
 import net.http
@@ -11,6 +12,19 @@ import os
 import time
 import venyowong.linq
 import x.json2
+
+const compressible_types := [
+	'text/plain',
+	'text/html',
+	'text/css',
+	'text/javascript',
+	'application/javascript',
+	'application/json',
+	'application/xml',
+	'image/svg+xml',
+	'font/woff',
+	'font/woff2'
+]
 
 pub struct HttpHandler {
 mut:
@@ -57,8 +71,37 @@ fn create_response(req http.Request, status http.Status, body string, content_ty
 	res.header.set(.content_type, content_type)
 	res.set_status(status)
 	res.set_version(req.version)
-	res.body = body
-	res.header.set(.content_length, body.len.str())
+	mut return_raw := true
+	accept_encoding := req.header.get(.accept_encoding) or { '' }
+	if body.len >= 512 && is_compressible_content_type(content_type) {
+		if accept_encoding.contains("gzip") {
+			bytes := gzip.compress(body.bytes()) or {
+				res.set_status(.internal_server_error)
+				res.header.set(.content_type, "text/plain")
+				res.body = "failed to use gzip compress body"
+				return res
+			}
+			res.body = bytes.bytestr()
+			res.header.set(.content_length, bytes.len.str())
+			res.header.set(.content_encoding, "gzip")
+			return_raw = false
+		} else if accept_encoding.contains("deflate") {
+			bytes := deflate.compress(body.bytes()) or {
+				res.set_status(.internal_server_error)
+				res.header.set(.content_type, "text/plain")
+				res.body = "failed to use gzip compress body"
+				return res
+			}
+			res.body = bytes.bytestr()
+			res.header.set(.content_length, bytes.len.str())
+			res.header.set(.content_encoding, "deflate")
+			return_raw = false
+		}
+	}
+	if return_raw {
+		res.body = body
+		res.header.set(.content_length, body.len.str())
+	}
 	return res
 }
 
@@ -67,8 +110,37 @@ fn create_bytes_response(req http.Request, status http.Status, body []u8, conten
 	res.header.set(.content_type, content_type)
 	res.set_status(status)
 	res.set_version(req.version)
-	res.body = body.bytestr()
-	res.header.set(.content_length, body.len.str())
+	mut return_raw := true
+	accept_encoding := req.header.get(.accept_encoding) or { '' }
+	if body.len >= 512 && is_compressible_content_type(content_type) {
+		if accept_encoding.contains("gzip") {
+			bytes := gzip.compress(body) or {
+				res.set_status(.internal_server_error)
+				res.header.set(.content_type, "text/plain")
+				res.body = "failed to use gzip compress body"
+				return res
+			}
+			res.body = bytes.bytestr()
+			res.header.set(.content_length, bytes.len.str())
+			res.header.set(.content_encoding, "gzip")
+			return_raw = false
+		} else if accept_encoding.contains("deflate") {
+			bytes := deflate.compress(body) or {
+				res.set_status(.internal_server_error)
+				res.header.set(.content_type, "text/plain")
+				res.body = "failed to use gzip compress body"
+				return res
+			}
+			res.body = bytes.bytestr()
+			res.header.set(.content_length, bytes.len.str())
+			res.header.set(.content_encoding, "deflate")
+			return_raw = false
+		}
+	}
+	if return_raw {
+		res.body = body.bytestr()
+		res.header.set(.content_length, body.len.str())
+	}
 	return res
 }
 
@@ -123,22 +195,50 @@ fn (mut h HttpHandler) handle_index(req http.Request, url urllib.URL) http.Respo
 		return create_response(req, .unauthorized, "", "")
 	}
 	if url.path.starts_with("/index/mappings") {
-		return create_response(req, .ok, extension.get_mappings(mut h.service), "application/json")
+		mappings := h.service.get_mappings() or {
+			return create_response(req, .ok, json.encode(
+				models.Result.fail(-1, "exception raised when getting mappings: $err")), "application/json")
+		}
+		return create_response(req, .ok, json.encode(
+			models.Result.success_with(mappings)), "application/json")
 	} else if url.path == "/index/log" {
 		mut r := json.decode(models.IndexLogReq, req.data) or {
 			return create_response(req, .bad_request, "request data is not json", "text/plain")
 		}
-		return create_response(req, .ok, extension.index_log(mut h.service, r), "application/json")
+		success := h.service.index_log(r.log_type, r.name, r.tags, r.parse_log, r.log) or {
+			return create_response(req, .ok, json.encode(
+				models.Result.fail(-1, "exception raised when indexing log: $err")), "application/json")
+		}
+		if success {
+			return create_response(req, .ok, json.encode(models.Result{}), "application/json")
+		} else {
+			return create_response(req, .ok, json.encode(models.Result.fail(-1, "failed to index log")), "application/json")
+		}
 	} else if url.path == "/index/logs" {
 		mut r := json.decode(models.IndexLogsReq, req.data) or {
 			return create_response(req, .bad_request, "request data is not json", "text/plain")
 		}
-		return create_response(req, .ok, extension.index_logs(mut h.service, r), "application/json")
+		h.service.index_logs(r.log_type, r.name, r.tags, r.parse_log, ...r.logs) or {
+			return create_response(req, .ok, json.encode(
+				models.Result.fail(-1, "exception raised when indexing logs: $err")), "application/json")
+		}
+		return create_response(req, .ok, json.encode(models.Result{}), "application/json")
 	} else if url.path == "/index/mapping" {
 		mut m := json.decode(meta.IndexMapping, req.data) or {
 			return create_response(req, .bad_request, "request data is not json", "text/plain")
 		}
-		return create_response(req, .ok, extension.mapping(mut h.service, mut m), "application/json")
+		c := h.service.check_mapping(m) or {
+			return create_response(req, .ok, json.encode(
+				models.Result.fail(-1, "exception raised when save mappings: $err")), "application/json")
+		}
+
+		if c {
+			m.mapping_time = time.now()
+			h.service.save_log(m)
+			return create_response(req, .ok, json.encode(models.Result{}), "application/json")
+		} else {
+			return create_response(req, .ok, json.encode(models.Result.fail(-1, "mapping has no change")), "application/json")
+		}
 	}
 
 	return create_response(req, .not_found, "", "")
@@ -161,7 +261,11 @@ fn (mut h HttpHandler) handle_search(req http.Request, url urllib.URL) http.Resp
 		}) or {
 			return create_response(req, .bad_request, "invalid log_type", "text/plain")
 		}
-		return create_response(req, .ok, extension.search_logs(mut h.service, log_type, name, query), "application/json")
+		logs := h.service.search_logs(log_type, name, query) or {
+			return create_response(req, .ok, json.encode(
+				models.Result.fail(-1, "exception raised when searching logs: $err")), "application/json")
+		}
+		return create_response(req, .ok, json2.encode(models.Result.success_with(logs)), "application/json")
 	}
 	
 	return create_response(req, .not_found, "", "")
@@ -178,4 +282,13 @@ fn (h HttpHandler) handle_static(req http.Request, url urllib.URL) http.Response
 	}
 
 	return create_bytes_response(req, .ok, bytes, get_mime_type(file_path))
+}
+
+fn is_compressible_content_type(content_type string) bool {
+    for t in compressible_types {
+        if content_type.contains(t) {
+            return true
+        }
+    }
+    return false
 }
