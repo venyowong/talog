@@ -105,9 +105,12 @@ fn create_response(req http.Request, status http.Status, body string, content_ty
 	return res
 }
 
-fn create_bytes_response(req http.Request, status http.Status, body []u8, content_type string) http.Response {
+fn create_bytes_response(req http.Request, status http.Status, body []u8, content_type string, is_static bool) http.Response {
 	mut res := http.Response{}
 	res.header.set(.content_type, content_type)
+	if is_static {
+		res.header.set(.cache_control, "public, max-age=31536000")
+	}
 	res.set_status(status)
 	res.set_version(req.version)
 	mut return_raw := true
@@ -281,7 +284,7 @@ fn (h HttpHandler) handle_static(req http.Request, url urllib.URL) http.Response
 		return create_response(req, .bad_request, 'Error reading file: ${err}', "text/plain")
 	}
 
-	return create_bytes_response(req, .ok, bytes, get_mime_type(file_path))
+	return create_bytes_response(req, .ok, bytes, get_mime_type(file_path), true)
 }
 
 fn is_compressible_content_type(content_type string) bool {
