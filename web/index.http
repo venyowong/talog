@@ -31,7 +31,7 @@ content-type: application/json
     "name": "eqp_simulator",
     "log_type": "raw",
     "log_header": "eqp",
-    "log_regex": "\\[(?P<time>[^\\]]*)\\] \\[(?P<level>[^\\]]*)\\] \\[(?P<name>[^\\]]*)\\] (?P<msg>.*)$",
+    "log_regex": "\\[(?P<time>[^\\.]*)\\.\\d{3} \\+08:00\\] \\[(?P<level>[^\\]]*)\\] \\[(?P<name>[^\\]]*)\\] (?P<msg>.*)$",
     "fields": [
         {
             "name": "time",
@@ -45,11 +45,6 @@ content-type: application/json
         {
             "name": "name",
             "tag_name": "name",
-            "type": "string"
-        },
-        {
-            "name": "secs",
-            "tag_name": "secs",
             "type": "string"
         },
         {

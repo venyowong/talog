@@ -1,0 +1,31 @@
+data_dir: "D:\\vector-0.51.0"
+sources:
+  eqp_simulator_logs:
+    type: "file"
+    include:
+      - "D:\\Qle.Info.Equipment.Simulator\\logs\\CA 013\\*.txt"
+    multiline:
+      start_pattern: "^\\[\\d{4}-\\d{2}-\\d{2}"
+      condition_pattern: "^\\[\\d{4}-\\d{2}-\\d{2}"
+      mode: "halt_before"
+      timeout_ms: 60000
+transforms:
+  pased:
+    inputs:
+      - "eqp_simulator_logs"
+    type: "remap"
+    source: |
+      .message = replace!(.message, "\r\n", "\n")
+      .message = replace!(.message, r'\r+$', "")
+      .name = "eqp_simulator"
+      .log_type = "raw"
+      .log = .message
+      .tags = [{"label": "name", "value": "CA 013"}]
+sinks:
+  talog:
+    inputs:
+      - "pased"
+    type: "http"
+    uri: "http://10.8.29.146:26382/index/logs2"
+    encoding:
+      codec: "json"

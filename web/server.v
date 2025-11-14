@@ -5,11 +5,10 @@ import compress.gzip
 import core
 import core.meta
 import json
+import log
 import models
-import net.http
-import net.urllib
-import os
 import time
+import veb
 import venyowong.linq
 import x.json2
 
@@ -26,265 +25,242 @@ const compressible_types := [
 	'font/woff2'
 ]
 
-pub struct HttpHandler {
-mut:
-	cidrs []CIDR
-pub:
+pub struct Context {
+	veb.Context
+}
+
+pub fn (ctx Context) get_param(key string) string {
+	mut value := ctx.form[key]
+	if value.len > 0 {
+		return value
+	}
+
+	value = ctx.query[key]
+	if value.len > 0 {
+		return value
+	}
+
+	value = ctx.get_custom_header(key) or {""}
+	if value.len > 0 {
+		return value
+	}
+
+	c := ctx.req.cookie(key) or {
+		return ""
+	}
+	return c.value
+}
+
+@[heap]
+pub struct App {
+	veb.Middleware[Context]
+	veb.StaticHandler
 	adm_pwd string
-	allow_list []string
+	cidrs []CIDR
 	jwt_secret string
-pub mut:
+mut:
+	log log.Log
 	service &core.Service
 }
 
-pub fn (mut h HttpHandler) handle(req http.Request) http.Response {
-	if h.cidrs.len != h.allow_list.len {
-		h.cidrs = linq.map(h.allow_list, fn (rule string) CIDR {return CIDR.parse(rule) or {CIDR{}}})
+pub fn App.new(service &core.Service, adm_pwd string, allow_list []string, jwt_secret string) App {
+	cidrs := linq.map(allow_list, fn (rule string) CIDR {return CIDR.parse(rule) or {CIDR{}}})
+	mut l := log.Log{}
+	$if prod {
+		l.set_level(.info)
+	} $else {
+		l.set_level(.debug)
 	}
-	url := urllib.parse(req.url) or {
-		return create_response(req, .internal_server_error, 
-			'exception raised when parsing url: ${err}', "text/plain")
-	}
-	if url.path.starts_with("/admin/") {
-		return h.handle_admin(req, url)
-	} else if url.path.starts_with("/index/") {
-		return h.handle_index(req, url)
-	} else if url.path.starts_with("/search/") {
-		return h.handle_search(req, url)
-	} else {
-		return h.handle_static(req, url)
+	l.set_full_logpath("./log.txt")
+	l.log_to_console_too()
+	defer {l.flush()}
+	l.info("Talog Http App setup...")
+
+	return App {
+		adm_pwd: adm_pwd
+		cidrs: cidrs
+		jwt_secret: jwt_secret
+		log: l
+		service: service
 	}
 }
 
-fn (h HttpHandler) check_request_auth(req http.Request) bool {
-	ip := get_real_client_ip(req)
-	mut b := h.cidrs.include(ip) or {false}
+pub fn (mut app App) check_request_auth(mut ctx Context) bool {
+	ip := extract_ipv4_from_mapped(ctx.ip())
+	mut b := app.cidrs.include(ip) or {false}
 	if b {return true}
 
-	token := req.header.get_custom("token") or {""}
-	b, _ = verify_jwt_token[JwtPayload](h.jwt_secret, token)
-	return b
+	token := ctx.get_param("token")
+	b, _ = verify_jwt_token[JwtPayload](app.jwt_secret, token)
+	if b {return true}
+
+	ctx.res.set_status(.unauthorized)
+	ctx.text("unauthorized")
+	return false
 }
 
-fn create_response(req http.Request, status http.Status, body string, content_type string) http.Response {
-	mut res := http.Response{}
-	res.header.set(.content_type, content_type)
-	res.set_status(status)
-	res.set_version(req.version)
-	mut return_raw := true
-	accept_encoding := req.header.get(.accept_encoding) or { '' }
-	if body.len >= 512 && is_compressible_content_type(content_type) {
+pub fn (mut app App) compress(mut ctx Context) bool {
+	accept_encoding := ctx.req.header.get(.accept_encoding) or { '' }
+	content_type := ctx.res.header.get(.content_type) or { '' }
+	if ctx.res.body.len >= 512 && is_compressible_content_type(content_type) {
 		if accept_encoding.contains("gzip") {
-			bytes := gzip.compress(body.bytes()) or {
-				res.set_status(.internal_server_error)
-				res.header.set(.content_type, "text/plain")
-				res.body = "failed to use gzip compress body"
-				return res
+			bytes := gzip.compress(ctx.res.body.bytes()) or {
+				app.log.warn("failed to use gzip compress body: ${err.msg()}")
+				return true
 			}
-			res.body = bytes.bytestr()
-			res.header.set(.content_length, bytes.len.str())
-			res.header.set(.content_encoding, "gzip")
-			return_raw = false
+			ctx.res.header.set(.vary, 'Accept-Encoding')
+			ctx.res.header.set(.content_length, bytes.len.str())
+			ctx.res.header.set(.content_encoding, "gzip")
+			ctx.res.body = bytes.bytestr()
 		} else if accept_encoding.contains("deflate") {
-			bytes := deflate.compress(body.bytes()) or {
-				res.set_status(.internal_server_error)
-				res.header.set(.content_type, "text/plain")
-				res.body = "failed to use gzip compress body"
-				return res
+			bytes := deflate.compress(ctx.res.body.bytes()) or {
+				app.log.warn("failed to use deflate compress body: ${err.msg()}")
+				return true
 			}
-			res.body = bytes.bytestr()
-			res.header.set(.content_length, bytes.len.str())
-			res.header.set(.content_encoding, "deflate")
-			return_raw = false
+			ctx.res.header.set(.vary, 'Accept-Encoding')
+			ctx.res.header.set(.content_length, bytes.len.str())
+			ctx.res.header.set(.content_encoding, "deflate")
+			ctx.res.body = bytes.bytestr()
 		}
 	}
-	if return_raw {
-		res.body = body
-		res.header.set(.content_length, body.len.str())
-	}
-	return res
+
+	return false
 }
 
-fn create_bytes_response(req http.Request, status http.Status, body []u8, content_type string, is_static bool) http.Response {
-	mut res := http.Response{}
-	res.header.set(.content_type, content_type)
-	if is_static {
-		res.header.set(.cache_control, "public, max-age=31536000")
-	}
-	res.set_status(status)
-	res.set_version(req.version)
-	mut return_raw := true
-	accept_encoding := req.header.get(.accept_encoding) or { '' }
-	if body.len >= 512 && is_compressible_content_type(content_type) {
-		if accept_encoding.contains("gzip") {
-			bytes := gzip.compress(body) or {
-				res.set_status(.internal_server_error)
-				res.header.set(.content_type, "text/plain")
-				res.body = "failed to use gzip compress body"
-				return res
-			}
-			res.body = bytes.bytestr()
-			res.header.set(.content_length, bytes.len.str())
-			res.header.set(.content_encoding, "gzip")
-			return_raw = false
-		} else if accept_encoding.contains("deflate") {
-			bytes := deflate.compress(body) or {
-				res.set_status(.internal_server_error)
-				res.header.set(.content_type, "text/plain")
-				res.body = "failed to use gzip compress body"
-				return res
-			}
-			res.body = bytes.bytestr()
-			res.header.set(.content_length, bytes.len.str())
-			res.header.set(.content_encoding, "deflate")
-			return_raw = false
+pub fn decompress(mut ctx Context) bool {
+	content_encoding := ctx.req.header.get(.content_encoding) or { '' }
+	if content_encoding.contains("gzip") {
+		bytes := gzip.decompress(ctx.req.data.bytes()) or {
+			ctx.request_error('invalid gzip encoding')
+			return false
 		}
+		ctx.req.data = bytes.bytestr()
+	} else if content_encoding.contains("deflate") {
+		bytes := deflate.decompress(ctx.req.data.bytes()) or {
+			ctx.request_error('invalid deflate encoding')
+			return false
+		}
+		ctx.req.data = bytes.bytestr()
 	}
-	if return_raw {
-		res.body = body.bytestr()
-		res.header.set(.content_length, body.len.str())
-	}
-	return res
+	return true
 }
 
-fn get_mime_type(file_path string) string {
-    ext := os.file_ext(file_path).to_lower()
-    match ext {
-        '.html', '.htm' { return 'text/html' }
-        '.css' { return 'text/css' }
-        '.js' { return 'text/javascript' }
-        '.json' { return 'application/json' }
-        '.png' { return 'image/png' }
-        '.jpg', '.jpeg' { return 'image/jpeg' }
-        '.gif' { return 'image/gif' }
-        '.svg' { return 'image/svg+xml' }
-        '.ico' { return 'image/x-icon' }
-        '.txt' { return 'text/plain' }
-        else { return 'application/octet-stream' }
-    }
+@["/admin/login"; post]
+pub fn (mut app App) login(mut ctx Context) veb.Result {
+	hash := md5_hash(app.adm_pwd) or {
+		return ctx.json(models.Result.fail(-1, 'exception raised when hashing password: ${err}'))
+	}
+	data := json2.decode[json2.Any](ctx.req.data) or {
+		return ctx.json(models.Result.fail(-1, 'exception raised when parsing json: ${err}'))
+	}
+	pwd := data.as_map()["pwd"] or {
+		return ctx.json(models.Result.fail(-1, 'exception raised when getting pwd from body'))
+	}
+	if hash != pwd.str() {
+		return ctx.json(models.Result.fail(-1, "wrong password"))
+	}
+
+	token := make_jwt_token(app.jwt_secret, JwtPayload {
+		iat: time.now().unix()
+		iss: "talog"
+		sub: "admin token"
+	})
+	return ctx.json(models.Result.success_with(token))
 }
 
-fn (mut h HttpHandler) handle_admin(req http.Request, url urllib.URL) http.Response {
-	if url.path == "/admin/login" {
-		hash := md5_hash(h.adm_pwd) or {
-			return create_response(req, .internal_server_error, 
-				'exception raised when hashing password: ${err}', "text/plain")
-		}
-		data := json2.decode[json2.Any](req.data) or {
-			return create_response(req, .internal_server_error, 
-				'exception raised when parsing json: ${err}', "text/plain")
-		}
-		pwd := data.as_map()["pwd"] or {
-			return create_response(req, .internal_server_error, 
-				'exception raised when getting pwd from body', "text/plain")
-		}
-		if hash != pwd.str() {
-			return create_response(req, .unauthorized, "wrong password", "text/plain")
-		}
-
-		token := make_jwt_token(h.jwt_secret, JwtPayload {
-			iat: time.now().unix()
-			iss: "talog"
-			sub: "admin token"
-		})
-		return create_response(req, .ok, json.encode(models.Result.success_with(token)), "application/json")
+@["/index/mappings"; get]
+pub fn (mut app App) get_mappings(mut ctx Context) veb.Result {
+	mappings := app.service.get_mappings() or {
+		return ctx.json(models.Result.fail(-1, "exception raised when getting mappings: $err"))
 	}
-
-	return create_response(req, .not_found, "", "")
+	return ctx.json(models.Result.success_with(mappings))
 }
 
-fn (mut h HttpHandler) handle_index(req http.Request, url urllib.URL) http.Response {
-	if !h.check_request_auth(req) {
-		return create_response(req, .unauthorized, "", "")
+@["/index"; post]
+pub fn (mut app App) index_log(mut ctx Context) veb.Result {
+	mut req := json.decode(models.IndexLogReq, ctx.req.data) or {
+		return ctx.json(models.Result.fail(-1, "request data is not json"))
 	}
-	if url.path.starts_with("/index/mappings") {
-		mappings := h.service.get_mappings() or {
-			return create_response(req, .ok, json.encode(
-				models.Result.fail(-1, "exception raised when getting mappings: $err")), "application/json")
-		}
-		return create_response(req, .ok, json.encode(
-			models.Result.success_with(mappings)), "application/json")
-	} else if url.path == "/index/log" {
-		mut r := json.decode(models.IndexLogReq, req.data) or {
-			return create_response(req, .bad_request, "request data is not json", "text/plain")
-		}
-		success := h.service.index_log(r.log_type, r.name, r.tags, r.parse_log, r.log) or {
-			return create_response(req, .ok, json.encode(
-				models.Result.fail(-1, "exception raised when indexing log: $err")), "application/json")
-		}
-		if success {
-			return create_response(req, .ok, json.encode(models.Result{}), "application/json")
-		} else {
-			return create_response(req, .ok, json.encode(models.Result.fail(-1, "failed to index log")), "application/json")
-		}
-	} else if url.path == "/index/logs" {
-		mut r := json.decode(models.IndexLogsReq, req.data) or {
-			return create_response(req, .bad_request, "request data is not json", "text/plain")
-		}
-		h.service.index_logs(r.log_type, r.name, r.tags, r.parse_log, ...r.logs) or {
-			return create_response(req, .ok, json.encode(
-				models.Result.fail(-1, "exception raised when indexing logs: $err")), "application/json")
-		}
-		return create_response(req, .ok, json.encode(models.Result{}), "application/json")
-	} else if url.path == "/index/mapping" {
-		mut m := json.decode(meta.IndexMapping, req.data) or {
-			return create_response(req, .bad_request, "request data is not json", "text/plain")
-		}
-		c := h.service.check_mapping(m) or {
-			return create_response(req, .ok, json.encode(
-				models.Result.fail(-1, "exception raised when save mappings: $err")), "application/json")
-		}
-
-		if c {
-			m.mapping_time = time.now()
-			h.service.save_log(m)
-			return create_response(req, .ok, json.encode(models.Result{}), "application/json")
-		} else {
-			return create_response(req, .ok, json.encode(models.Result.fail(-1, "mapping has no change")), "application/json")
-		}
+	success := app.service.index_log(req.log_type, req.name, req.tags, true, req.log) or {
+		return ctx.json(models.Result.fail(-1, "exception raised when indexing log: $err"))
 	}
-
-	return create_response(req, .not_found, "", "")
+	if success {
+		return ctx.json(models.Result{})
+	} else {
+		return ctx.json(models.Result.fail(-1, "failed to index log"))
+	}
 }
 
-fn (mut h HttpHandler) handle_search(req http.Request, url urllib.URL) http.Response {
-	if !h.check_request_auth(req) {
-		return create_response(req, .unauthorized, "", "")
+@["/index/logs"; post]
+pub fn (mut app App) index_logs(mut ctx Context) veb.Result {
+	defer {app.log.flush()}
+	mut r := json.decode(models.IndexLogsReq, ctx.req.data) or {
+		return ctx.json(models.Result.fail(-1, "request data is not json"))
 	}
-	if url.path.starts_with("/search/logs") {
-		q := urllib.parse_query(url.raw_query) or {
-			return create_response(req, .bad_request, "invalid url query string", "text/plain")
-		}
-		name := q.get("name") or {
-			return create_response(req, .bad_request, "name can't be empty", "text/plain")
-		}
-		query := q.get("query") or {""}
-		log_type := meta.LogType.parse(q.get("log_type") or {
-			return create_response(req, .bad_request, "log_type can't be empty", "text/plain")
-		}) or {
-			return create_response(req, .bad_request, "invalid log_type", "text/plain")
-		}
-		logs := h.service.search_logs(log_type, name, query) or {
-			return create_response(req, .ok, json.encode(
-				models.Result.fail(-1, "exception raised when searching logs: $err")), "application/json")
-		}
-		return create_response(req, .ok, json2.encode(models.Result.success_with(logs)), "application/json")
+	start := time.now().unix_milli()
+	app.service.index_logs(r.log_type, r.name, r.tags, r.parse_log, ...r.logs) or {
+		return ctx.json(models.Result.fail(-1, "exception raised when indexing logs: $err"))
 	}
-	
-	return create_response(req, .not_found, "", "")
+	elapsed := time.now().unix_milli() - start
+	app.log.debug("index $r.name logs, total logs: $r.logs.len, elapsed: $elapsed")
+	return ctx.json(models.Result{})
 }
 
-fn (h HttpHandler) handle_static(req http.Request, url urllib.URL) http.Response {
-	file_path := os.join_path("./public", url.path)
-	if !os.exists(file_path) || os.is_dir(file_path) {
-		return create_response(req, .not_found, "", "")
+@["/index/logs2"; post]
+pub fn (mut app App) index_logs2(mut ctx Context) veb.Result {
+	defer {app.log.flush()}
+	mut reqs := json.decode([]models.IndexLogReq, ctx.req.data) or {
+		return ctx.json(models.Result.fail(-1, "request data is not json"))
+	}
+	start := time.now().unix_milli()
+	for mut r in reqs {
+		app.service.index_log(r.log_type, r.name, r.tags, true, r.log) or {
+			return ctx.json(models.Result.fail(-1, "exception raised when indexing log: $err"))
+		}
+	}
+	elapsed := time.now().unix_milli() - start
+	app.log.debug("index multi logs, total logs: $reqs.len, elapsed: $elapsed")
+	return ctx.json(models.Result{})
+}
+
+@["/index/mapping"; post]
+pub fn (mut app App) mapping(mut ctx Context) veb.Result {
+	mut m := json.decode(meta.IndexMapping, ctx.req.data) or {
+		return ctx.json(models.Result.fail(-1, "request data is not json"))
+	}
+	c := app.service.check_mapping(m) or {
+		return ctx.json(models.Result.fail(-1, "failed to save mappings: $err"))
 	}
 
-	bytes := os.read_bytes(file_path) or {
-		return create_response(req, .bad_request, 'Error reading file: ${err}', "text/plain")
+	if c {
+		m.mapping_time = time.now()
+		app.service.save_log(m)
+		return ctx.json(models.Result{})
+	} else {
+		return ctx.json(models.Result.fail(-1, "mapping has no change"))
 	}
+}
 
-	return create_bytes_response(req, .ok, bytes, get_mime_type(file_path), true)
+@["/search/logs"; get]
+pub fn (mut app App) search_logs(mut ctx Context) veb.Result {
+	name := ctx.query["name"]
+	query := ctx.query["query"]
+	log_type := meta.LogType.parse(ctx.query["log_type"]) or {
+		return ctx.json(models.Result.fail(-1, "invalid log_type"))
+	}
+	logs := app.service.search_logs(log_type, name, query) or {
+		return ctx.json(models.Result.fail(-1, "exception raised when searching logs: $err"))
+	}
+	return ctx.send_response_to_client("application/json", json2.encode(models.Result.success_with(logs)))
+}
+
+pub fn (mut app App) run_server(port int) ! {
+	app.use(handler: decompress)
+	app.route_use("/index/:path...", handler: app.check_request_auth)
+	app.route_use("/search/:path...", handler: app.check_request_auth)
+	app.handle_static("public", true)!
+	app.use(handler: app.compress, after: true)
+	veb.run[App, Context](mut app, port)
 }
 
 fn is_compressible_content_type(content_type string) bool {

@@ -29,7 +29,7 @@ pub fn (mut service Service) setup() ! {
     }
 
 	$if prod {
-	service.log.set_level(.info)
+		service.log.set_level(.info)
 	} $else {
 		service.log.set_level(.debug)
 	}

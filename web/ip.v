@@ -1,7 +1,5 @@
 module web
 
-import net.http
-
 pub struct CIDR {
 pub:
 	rule string
@@ -51,35 +49,21 @@ pub fn (cidrs []CIDR) include(ip string) !bool {
     return false
 }
 
-pub fn get_real_client_ip(req http.Request) string {
-    // common ip headers
-    proxy_headers := [
-        'x-real-ip',           // Nginx
-        'x-forwarded-for',     // standard proxy
-        'x-original-forwarded-for',
-        'cf-connecting-ip',    // Cloudflare
-        'true-client-ip',      // Akamai, Cloudflare
-        'x-cluster-client-ip',
-    ]
+pub fn extract_ipv4_from_mapped(ip string) string {
+    if ip.starts_with('::ffff:') {
+        return ip[7..]
+    }
     
-    for header in proxy_headers {
-        ip := req.header.get_custom(header) or { continue }
-        if ip != '' && is_valid_ip(ip) {
-            if header == 'x-forwarded-for' {
-                ips := ip.split(',')
-                if ips.len > 0 {
-                    real_ip := ips[0].trim_space()
-                    if is_valid_ip(real_ip) {
-                        return real_ip
-                    }
-                }
-            } else {
-                return ip
+    if ip.contains('.') {
+        parts := ip.split(':')
+        for part in parts {
+            if part.contains('.') {
+                return part
             }
         }
     }
     
-    return req.header.get_custom("Remote-Addr") or {""}
+    return ip
 }
 
 pub fn ip_to_u32(ip string) !u32 {
