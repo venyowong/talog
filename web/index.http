@@ -60,4 +60,8 @@ http://127.0.0.1:26382/index/mappings
 
 ###
 
+POST http://127.0.0.1:26381/index/remove?name=eqp_simulator
+
+###
+
 http://localhost:26382/search/logs?name=old_eap&log_type=raw&query=

@@ -54,6 +54,14 @@ pub fn (mut index Index) setup(base_path string) ! {
 	index.buckets = index_object.buckets.clone()
 }
 
+pub fn (mut index Index) destroy() ! {
+	index.mutex.lock()
+	defer {index.mutex.unlock()}
+
+	index.need_save = false
+	os.rmdir_all(index.path)!
+}
+
 pub fn (mut index Index) get_all_logs[T](map_log fn (line string, tags []structs.Tag) T) ![]T {
 	mut result := []T{}
 	for bucket in index.buckets.values() {

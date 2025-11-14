@@ -206,6 +206,11 @@ pub fn parse_log_with_regex(l string, reg string) !map[string]string {
 	return m
 }
 
+pub fn (mut service Service) remove_index(name string) ! {
+	mut idx := service.indices.remove(name) or {return}
+	idx.destroy()!
+}
+
 pub fn (mut service Service) save_log[T](value T) {
 	mut tags := []structs.Tag{}
 	$for field in T.fields {

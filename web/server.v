@@ -241,6 +241,14 @@ pub fn (mut app App) mapping(mut ctx Context) veb.Result {
 	}
 }
 
+@["/index/remove"; post]
+pub fn (mut app App) remove_index(mut ctx Context) veb.Result {
+	app.service.remove_index(ctx.query["name"]) or {
+		return ctx.json(models.Result.fail(-1, "failed to remove index: $err"))
+	}
+	return ctx.json(models.Result{})
+}
+
 @["/search/logs"; get]
 pub fn (mut app App) search_logs(mut ctx Context) veb.Result {
 	name := ctx.query["name"]
