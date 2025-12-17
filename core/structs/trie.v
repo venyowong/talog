@@ -7,9 +7,9 @@ pub struct Trie {
 mut:
 	mutex sync.RwMutex = sync.RwMutex{} @[json: '-']
 pub mut:
-	char string @[json: Char]
-	nodes []&Trie @[json: Nodes]
-	buckets map[string]Bucket @[json: Buckets]
+	char string
+	nodes []&Trie
+	buckets map[string]Bucket
 }
 
 pub fn (mut trie Trie) append(path string, bucket Bucket) bool {

@@ -12,6 +12,12 @@ import veb
 import venyowong.linq
 import x.json2
 
+const cacheable_type := [
+	'text/html',
+	'text/css',
+	'text/javascript'
+]
+
 const compressible_types := [
 	'text/plain',
 	'text/html',
@@ -59,28 +65,17 @@ pub struct App {
 	cidrs []CIDR
 	jwt_secret string
 mut:
-	log log.Log
 	service &core.Service
 }
 
 pub fn App.new(service &core.Service, adm_pwd string, allow_list []string, jwt_secret string) App {
 	cidrs := linq.map(allow_list, fn (rule string) CIDR {return CIDR.parse(rule) or {CIDR{}}})
-	mut l := log.Log{}
-	$if prod {
-		l.set_level(.info)
-	} $else {
-		l.set_level(.debug)
-	}
-	l.set_full_logpath("./log.txt")
-	l.log_to_console_too()
-	defer {l.flush()}
-	l.info("Talog Http App setup...")
+	log.info("talog Http App setup...")
 
 	return App {
 		adm_pwd: adm_pwd
 		cidrs: cidrs
 		jwt_secret: jwt_secret
-		log: l
 		service: service
 	}
 }
@@ -102,10 +97,13 @@ pub fn (mut app App) check_request_auth(mut ctx Context) bool {
 pub fn (mut app App) compress(mut ctx Context) bool {
 	accept_encoding := ctx.req.header.get(.accept_encoding) or { '' }
 	content_type := ctx.res.header.get(.content_type) or { '' }
+	if is_cacheable_content_type(content_type) {
+		ctx.res.header.set(.cache_control, 'public, max-age=31536000')
+	}
 	if ctx.res.body.len >= 512 && is_compressible_content_type(content_type) {
 		if accept_encoding.contains("gzip") {
 			bytes := gzip.compress(ctx.res.body.bytes()) or {
-				app.log.warn("failed to use gzip compress body: ${err.msg()}")
+				log.warn("failed to use gzip compress body: ${err.msg()}")
 				return true
 			}
 			ctx.res.header.set(.vary, 'Accept-Encoding')
@@ -114,7 +112,7 @@ pub fn (mut app App) compress(mut ctx Context) bool {
 			ctx.res.body = bytes.bytestr()
 		} else if accept_encoding.contains("deflate") {
 			bytes := deflate.compress(ctx.res.body.bytes()) or {
-				app.log.warn("failed to use deflate compress body: ${err.msg()}")
+				log.warn("failed to use deflate compress body: ${err.msg()}")
 				return true
 			}
 			ctx.res.header.set(.vary, 'Accept-Encoding')
@@ -168,20 +166,12 @@ pub fn (mut app App) login(mut ctx Context) veb.Result {
 	return ctx.json(models.Result.success_with(token))
 }
 
-@["/index/mappings"; get]
-pub fn (mut app App) get_mappings(mut ctx Context) veb.Result {
-	mappings := app.service.get_mappings() or {
-		return ctx.json(models.Result.fail(-1, "exception raised when getting mappings: $err"))
-	}
-	return ctx.json(models.Result.success_with(mappings))
-}
-
 @["/index"; post]
 pub fn (mut app App) index_log(mut ctx Context) veb.Result {
 	mut req := json.decode(models.IndexLogReq, ctx.req.data) or {
 		return ctx.json(models.Result.fail(-1, "request data is not json"))
 	}
-	success := app.service.index_log(req.log_type, req.name, req.tags, true, req.log) or {
+	success := app.service.index_log(req.log_type, req.name, req.tags, req.parse_log, req.log) or {
 		return ctx.json(models.Result.fail(-1, "exception raised when indexing log: $err"))
 	}
 	if success {
@@ -193,7 +183,6 @@ pub fn (mut app App) index_log(mut ctx Context) veb.Result {
 
 @["/index/logs"; post]
 pub fn (mut app App) index_logs(mut ctx Context) veb.Result {
-	defer {app.log.flush()}
 	mut r := json.decode(models.IndexLogsReq, ctx.req.data) or {
 		return ctx.json(models.Result.fail(-1, "request data is not json"))
 	}
@@ -202,24 +191,32 @@ pub fn (mut app App) index_logs(mut ctx Context) veb.Result {
 		return ctx.json(models.Result.fail(-1, "exception raised when indexing logs: $err"))
 	}
 	elapsed := time.now().unix_milli() - start
-	app.log.debug("index $r.name logs, total logs: $r.logs.len, elapsed: $elapsed")
+	log.info("index $r.name logs, total logs: $r.logs.len, elapsed: $elapsed")
 	return ctx.json(models.Result{})
 }
 
 @["/index/logs2"; post]
 pub fn (mut app App) index_logs2(mut ctx Context) veb.Result {
-	defer {app.log.flush()}
 	mut reqs := json.decode([]models.IndexLogReq, ctx.req.data) or {
 		return ctx.json(models.Result.fail(-1, "request data is not json"))
 	}
+	if reqs.len == 0 {
+		return ctx.json(models.Result.fail(-1, "empty logs"))
+	}
+
+	log_type := reqs[0].log_type
+	name := reqs[0].name
+	m := app.service.get_mapping(log_type, name) or {
+		return ctx.json(models.Result.fail(-1, "$name has no index mapping"))
+	}
 	start := time.now().unix_milli()
 	for mut r in reqs {
-		app.service.index_log(r.log_type, r.name, r.tags, true, r.log) or {
+		app.service.index_log_with_mapping(m, r.tags, r.parse_log, r.log) or {
 			return ctx.json(models.Result.fail(-1, "exception raised when indexing log: $err"))
 		}
 	}
 	elapsed := time.now().unix_milli() - start
-	app.log.debug("index multi logs, total logs: $reqs.len, elapsed: $elapsed")
+	log.info("index multi logs, total logs: $reqs.len, elapsed: $elapsed")
 	return ctx.json(models.Result{})
 }
 
@@ -241,12 +238,33 @@ pub fn (mut app App) mapping(mut ctx Context) veb.Result {
 	}
 }
 
+@["/index/mappings"; get]
+pub fn (mut app App) get_mappings(mut ctx Context) veb.Result {
+	mappings := app.service.get_mappings() or {
+		return ctx.json(models.Result.fail(-1, "exception raised when getting mappings: $err"))
+	}
+	names := app.service.get_indexies()
+	mut result := []meta.IndexMapping{}
+	for m in mappings {
+		if m.name in names {
+			result << m
+		}
+	}
+	return ctx.json(models.Result.success_with(result))
+}
+
 @["/index/remove"; post]
 pub fn (mut app App) remove_index(mut ctx Context) veb.Result {
 	app.service.remove_index(ctx.query["name"]) or {
 		return ctx.json(models.Result.fail(-1, "failed to remove index: $err"))
 	}
 	return ctx.json(models.Result{})
+}
+
+@["/index/tag/values"]
+pub fn (mut app App) get_tag_values(mut ctx Context) veb.Result {
+	values := app.service.get_tag_values(ctx.query["name"], ctx.query["label"])
+	return ctx.json(models.Result.success_with(values))
 }
 
 @["/search/logs"; get]
@@ -269,6 +287,15 @@ pub fn (mut app App) run_server(port int) ! {
 	app.handle_static("public", true)!
 	app.use(handler: app.compress, after: true)
 	veb.run[App, Context](mut app, port)
+}
+
+fn is_cacheable_content_type(content_type string) bool {
+    for t in cacheable_type {
+        if content_type.contains(t) {
+            return true
+        }
+    }
+    return false
 }
 
 fn is_compressible_content_type(content_type string) bool {

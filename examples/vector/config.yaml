@@ -3,14 +3,23 @@ sources:
   eqp_simulator_logs:
     type: "file"
     include:
-      - "D:\\Qle.Info.Equipment.Simulator\\logs\\CA 013\\*.txt"
+      - "D:\\Qle.Info.Equipment.Simulator\\logs\\**\\*.txt"
+    multiline:
+      start_pattern: "^\\[\\d{4}-\\d{2}-\\d{2}"
+      condition_pattern: "^\\[\\d{4}-\\d{2}-\\d{2}"
+      mode: "halt_before"
+      timeout_ms: 60000
+  FSCR61_logs:
+    type: file
+    include:
+      - "C:\\Users\\venyo.wong\\Documents\\工作\\2025\\36. 10.28 水洗机\\logs\\*.txt"
     multiline:
       start_pattern: "^\\[\\d{4}-\\d{2}-\\d{2}"
       condition_pattern: "^\\[\\d{4}-\\d{2}-\\d{2}"
       mode: "halt_before"
       timeout_ms: 60000
 transforms:
-  pased:
+  parsed:
     inputs:
       - "eqp_simulator_logs"
     type: "remap"
@@ -19,13 +28,43 @@ transforms:
       .message = replace!(.message, r'\r+$', "")
       .name = "eqp_simulator"
       .log_type = "raw"
+      .parse_log = true
       .log = .message
-      .tags = [{"label": "name", "value": "CA 013"}]
+      .tags = []
+  FSCR61_parsed:
+    inputs:
+      - "FSCR61_logs"
+    type: "remap"
+    source: |
+      .message = replace!(.message, "\r\n", "\n")
+      .message = replace!(.message, r'\r+$', "")
+      .name = "eap2"
+      .log_type = "raw"
+      .parse_log = true
+      .log = .message
+      .tags = [{"label": "eqp_id", "value": "FSCR61"}]
 sinks:
   talog:
     inputs:
-      - "pased"
+      - "parsed"
+      - FSCR61_parsed
     type: "http"
     uri: "http://10.8.29.146:26382/index/logs2"
     encoding:
       codec: "json"
+  # es:
+  #   type: "elasticsearch"
+  #   inputs:
+  #     - "parsed"
+  #   endpoints: 
+  #     - "https://10.8.28.206:9200"
+  #   bulk:
+  #     index: "eqp_simulators"
+  #   auth:
+  #     strategy: "basic"
+  #     user: "elastic"
+  #     password: "JBOWisAf7N*wwGRVH=7z"
+  #   tls:
+  #     ca_file: "D:\\logstash-9.0.1\\http_ca.crt"
+  #   request:
+  #     timeout_secs: 60

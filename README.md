@@ -34,10 +34,6 @@ Commands:
 }
 ```
 
-## api
-
-[.http](./web/index.http)
-
 ## web page
 
 [http://127.0.0.1:26382/index.html](http://127.0.0.1:26382/index.html)
@@ -45,3 +41,5 @@ Commands:
 ## docs
 
 Because my english is poor, I am unable to accurately describe the core principles in English, so I use Chinese to do it.
+
+[Documents](./docs/index.md)

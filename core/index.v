@@ -7,6 +7,7 @@ import os
 import sync
 import time
 import venyowong.concurrent
+import venyowong.file
 import venyowong.linq
 import venyowong.query
 
@@ -14,7 +15,6 @@ pub struct Index {
 	index_file string = 'index.json' @[json: '-']
 mut:
 	index_file_path string @[json: '-']
-	log log.Log @[json: '-']
 	mutex sync.RwMutex @[json: '-']
 	need_save bool @[json: '-']
 	path string @[json: '-']
@@ -32,34 +32,36 @@ pub fn (mut index Index) setup(base_path string) ! {
 		os.mkdir_all(index.path)!
 	}
 
-	index.log.set_level(.info)
-	index.log.set_full_logpath(os.join_path(index.path, "log.txt"))
-	index.log.log_to_console_too()
-	index.log.info("Talog index [$index.name] setup...")
-	defer {index.log.flush()}
+	log.info("Talog index [$index.name] setup...")
 	index.index_file_path = os.join_path(index.path, index.index_file)
 	if !os.exists(index.index_file_path) {
 		return
 	}
 
 	content := os.read_file(index.index_file_path) or {
-		index.log.error("Cannot read $index.index_file_path: $err")
+		log.error("Cannot read $index.index_file_path: $err")
 		return
 	}
 	index_object := json.decode(Index, content) or {
-		index.log.error("Cannot decode $index.index_file_path: $err")
+		log.error("Cannot decode $index.index_file_path: $err")
 		return
 	}
 	index.tries = index_object.tries.clone()
 	index.buckets = index_object.buckets.clone()
 }
 
-pub fn (mut index Index) destroy() ! {
-	index.mutex.lock()
-	defer {index.mutex.unlock()}
+pub fn (mut idx Index) close() ! {
+	idx.mutex.lock()
+	defer {idx.mutex.unlock()}
 
-	index.need_save = false
-	os.rmdir_all(index.path)!
+	idx.save()!
+}
+
+pub fn (mut idx Index) destroy() ! {
+	idx.mutex.lock()
+	defer {idx.mutex.unlock()}
+
+	os.rmdir_all(idx.path)!
 }
 
 pub fn (mut index Index) get_all_logs[T](map_log fn (line string, tags []structs.Tag) T) ![]T {
@@ -117,24 +119,12 @@ pub fn (mut index Index) get_tag_values(label string) []string {
 }
 
 pub fn (mut index Index) push(tags []structs.Tag, logs ...string) {
-	index.mutex.lock()
-	index.wg.add(1)
-	spawn index.flush()
-	defer {
-		index.wg.done()
-		index.mutex.unlock()
-	}
-
 	bucket := structs.Bucket.new(index.name, index.path, tags) or {
-		index.log.error("failed to new bucket $index.name $index.path $tags")
+		log.error("failed to new bucket $index.name $index.path $tags")
 		return
 	}
+	file.append_by_chan(bucket.file, ...logs)
 	index.buckets[bucket.key] = bucket
-	index.safe_file.append(bucket.file, ...logs) or {
-		index.log.error("failed to append logs to file $bucket.file")
-		return
-	}
-
 	for tag in tags {
 		mut trie := &structs.Trie{}
 		if tag.label !in index.tries {
@@ -146,6 +136,7 @@ pub fn (mut index Index) push(tags []structs.Tag, logs ...string) {
 			index.need_save = true
 		}
 	}
+	spawn index.flush()
 }
 
 pub fn (mut index Index) remove_bucket(key string) ! {
@@ -189,7 +180,7 @@ pub fn (mut index Index) save() ! {
 		return
 	}
 
-	index.log.debug("Talog index [$index.name] saving...")
+	log.debug("Talog index [$index.name] saving...")
 	index.safe_file.write_file(index.index_file_path, json.encode(index))!
 }
 
@@ -255,24 +246,27 @@ pub fn (mut index Index) search_logs[T](q query.Query, map_log fn (line string, 
 	return result
 }
 
+fn (mut idx Index) append_logs(path string, logs []string) {
+	idx.safe_file.append(path, ...logs) or {
+		log.error("failed to append logs to file $path")
+	}
+}
+
 fn (mut index Index) flush() {
-	time.sleep(100 * time.millisecond)
-	index.log.debug("$index.name wg waiting...")
+	time.sleep(1000 * time.millisecond)
 	index.wg.wait()
-	index.log.debug("$index.name wg passed")
 	if !index.need_save {
 		return
 	}
 	// wait group is all done, this thread can hold write lock
 	index.mutex.lock()
 	defer {index.mutex.unlock()}
-	index.log.debug("$index.name flush lock...")
 	if !index.need_save {
 		return
 	}
 
 	index.save() or {
-		index.log.warn("failed to save index $index.name: $err")
+		log.warn("failed to save index $index.name: $err")
 		return
 	}
 

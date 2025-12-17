@@ -18,7 +18,7 @@ fn main() {
 				flag: cli.FlagType.string
 				abbrev: "c"
 				name: 'config'
-				description: 'config file, json format, default value is ./config.json'
+				description: 'config file, json format'
 				default_value: ['./config.json']
 			},
 			cli.Flag {
@@ -46,6 +46,8 @@ fn run(cmd cli.Command) ! {
 	l.set_full_logpath("./log.txt")
 	l.log_to_console_too()
 	l.info("talog is running...")
+	log.set_logger(l)
+	log.set_always_flush(true)
 	mut config := json.decode(talog.Config, os.read_file(cmd.flags.get_string('config')!)!)!
 
 	data_path := cmd.flags.get_string('data')!

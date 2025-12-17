@@ -6,11 +6,11 @@ import venyowong.linq
 import os
 
 pub struct Bucket {
-pub mut:
+pub:
+	file string
 	index string
 	key string
 	tags []Tag
-	file string
 }
 
 pub fn Bucket.new(index string, path string, tags []Tag) !Bucket {
@@ -20,10 +20,11 @@ pub fn Bucket.new(index string, path string, tags []Tag) !Bucket {
     hasher.write(str.bytes())!
     hash_bytes := hasher.sum([]u8{})
 	key := hash_bytes.hex()
+	file := os.join_path(path, key + ".log")
 	return Bucket {
-		index: index,
-		tags: tags,
-		key: key,
-		file: os.join_path(path, key + ".log")
+		file: file
+		index: index
+		key: key
+		tags: tags
 	}
 }

@@ -15,8 +15,6 @@ import x.json2
 
 @[heap]
 pub struct Service {
-mut:
-	log log.Log
 pub mut:
 	indices concurrent.SafeStructMap[Index]
 	data_path string
@@ -28,21 +26,13 @@ pub fn (mut service Service) setup() ! {
         []string{}
     }
 
-	$if prod {
-		service.log.set_level(.info)
-	} $else {
-		service.log.set_level(.debug)
-	}
-	service.log.set_full_logpath("./log.txt")
-	service.log.log_to_console_too()
-	defer {service.log.flush()}
-	service.log.info("Talog service setup...")
+	log.info("talog service setup...")
 	for entry in entries {
         mut index := Index {
 			name: entry
 		}
 		index.setup(service.data_path) or {
-			service.log.error("error occured when $entry index setup")
+			log.error("error occured when $entry index setup")
 			continue
 		}
 		service.indices.set(entry, &index)
@@ -88,11 +78,16 @@ pub fn (mut service Service) check_mapping(mapping meta.IndexMapping) !bool {
 }
 
 pub fn (mut service Service) close() ! {
-	service.log.info("Talog service closing...")
-	defer {service.log.flush()}
+	log.info("Talog service closing...")
 	for mut index in service.indices.values() {
-		index.save()!
+		index.close()!
 	}
+}
+
+pub fn (mut service Service) get_indexies() []string {
+	return os.ls(service.data_path) or {
+        []string{}
+    }
 }
 
 pub fn (mut service Service) get_mapping(log_type meta.LogType, name string) !meta.IndexMapping {
@@ -132,20 +127,30 @@ pub fn (mut service Service) get_or_create_index(name string) &Index {
 	})
 }
 
+pub fn (mut service Service) get_tag_values(name string, label string) []string {
+	mut idx := service.get_or_create_index(name)
+	return idx.get_tag_values(label)
+}
+
 pub fn (mut service Service) index_log(log_type meta.LogType, name string, 
 	tags []structs.Tag, parse_log bool, l string) !bool {
-	mapping := service.get_mapping(log_type, name) or {return error("$name has no index mapping")}
+	m := service.get_mapping(log_type, name) or {return error("$name has no index mapping")}
+	return service.index_log_with_mapping(m, tags, parse_log, l)
+}
+
+pub fn (mut service Service) index_log_with_mapping(m meta.IndexMapping, tags []structs.Tag, 
+	parse_log bool, l string) !bool {
 	if parse_log {
-		if mapping.log_type == .json {
-			return service.index_json_log(mapping, tags, l)!
+		if m.log_type == .json {
+			return service.index_json_log(m, tags, l)!
 		}
 
-		if mapping.log_regex.len > 0 {
-			return service.index_log_with_regex(mapping, tags, l)!
+		if m.log_regex.len > 0 {
+			return service.index_log_with_regex(m, tags, l)!
 		}
 	}
 
-	return service.index_raw_log(mapping, tags, l)
+	return service.index_raw_log(m, tags, l)
 }
 
 pub fn (mut service Service) index_logs(log_type meta.LogType, name string, 
@@ -250,7 +255,7 @@ pub fn (mut service Service) search_logs(log_type meta.LogType, name string, q s
 		result = service.search_raw_log(m, q)!
 	}
 	elapsed := time.now().unix_milli() - start
-	service.log.debug("search $name logs by $q, total logs: $result.len, elapsed: $elapsed")
+	log.info("search $name logs by $q, total logs: $result.len, elapsed: $elapsed")
 	return result
 }
 
@@ -526,7 +531,7 @@ fn (mut service Service) search_raw_log_with_header(m meta.IndexMapping, query_s
 	mut start := time.now().unix_milli()
 	buckets := index.search(q)!
 	mut elapsed := time.now().unix_milli() - start
-	service.log.debug("search $m.name buckets by $query_str, total buckets: $buckets.len, elapsed: $elapsed")
+	log.info("search $m.name buckets by $query_str, total buckets: $buckets.len, elapsed: $elapsed")
 	mut result := []structs.LogModel{}
 	for bucket in buckets {
 		logs := index.safe_file.read_by_line[string](bucket.file, fn (line string) ?string {
