@@ -9,6 +9,7 @@ import os
 import regex
 import time
 import venyowong.concurrent
+import venyowong.file
 import venyowong.linq
 import venyowong.query
 import x.json2
@@ -16,7 +17,7 @@ import x.json2
 @[heap]
 pub struct Service {
 pub mut:
-	indices concurrent.SafeStructMap[Index]
+	indices concurrent.AsyncMap[Index]
 	data_path string
 }
 
@@ -100,7 +101,7 @@ pub fn (mut service Service) get_mapping(log_type meta.LogType, name string) !me
 }
 
 pub fn (mut service Service) get_mappings_by_type(log_type meta.LogType) ![]meta.IndexMapping {
-	mut idx := service.get_or_create_index("meta.IndexMapping")
+	mut idx := service.get_or_create_index("index_mapping")
 	mut mappings := idx.search_logs(query.Query.parse("log_type == $log_type")!, fn (line string, _ []structs.Tag) meta.IndexMapping {
 		return json.decode(meta.IndexMapping, line) or {
 			panic("the type of log is not json: $line")
@@ -110,7 +111,7 @@ pub fn (mut service Service) get_mappings_by_type(log_type meta.LogType) ![]meta
 }
 
 pub fn (mut service Service) get_mappings() ![]meta.IndexMapping {
-	mut idx := service.get_or_create_index("meta.IndexMapping")
+	mut idx := service.get_or_create_index("index_mapping")
 	mut mappings := idx.get_all_logs(fn (line string, _ []structs.Tag) meta.IndexMapping {
 		return json.decode(meta.IndexMapping, line) or {
 			panic("the type of log is not json: $line")
@@ -168,7 +169,7 @@ pub fn (mut service Service) index_logs(log_type meta.LogType, name string,
 pub fn (mut service Service) mapping[T]() ! {
 	// analyse current mapping
 	mut mapping := meta.IndexMapping {
-		name: T.name
+		name: get_index_name[T]()
 		log_type: .json
 		mapping_time: time.now()
 	}
@@ -239,7 +240,7 @@ pub fn (mut service Service) save_log[T](value T) {
 			}
 		}
 	}
-	mut index := service.get_or_create_index(T.name)
+	mut index := service.get_or_create_index(get_index_name[T]())
 	index.push(tags, json.encode(value))
 }
 
@@ -376,9 +377,23 @@ fn get_field_type(field FieldData) string {
 	return "string"
 }
 
+fn get_index_name[T]() string {
+	$for a in T.attributes {
+		if a.name == "index" {
+			if a.has_arg {
+				return a.arg
+			} else {
+				return T.name
+			}
+		}
+	}
+
+	return T.name
+}
+
 fn group_mappings(mut mappings []meta.IndexMapping) []meta.IndexMapping {
 	list := arrays.group_by(mappings, fn (m meta.IndexMapping) string{return m.name}).values()
-	return linq.map(list, fn (l []meta.IndexMapping) meta.IndexMapping {
+	return list.map(fn (l []meta.IndexMapping) meta.IndexMapping {
 		mut l2 := l.clone()
 		return linq.order(mut l2, fn (m1 meta.IndexMapping, m2 meta.IndexMapping) bool {
 			return m2.mapping_time > m1.mapping_time
@@ -486,7 +501,7 @@ fn (mut service Service) index_log_with_regex(m meta.IndexMapping, tags []struct
 fn (mut service Service) index_raw_log(m meta.IndexMapping, tags []structs.Tag, logs ...string) bool {
 	mut index := service.get_or_create_index(m.name)
 	if m.log_header.len > 0 {
-		index.push(tags, ...linq.map(logs, fn [m] (l string) string {
+		index.push(tags, ...logs.map(fn [m] (l string) string {
 			return "$m.log_header $l"
 		}))
 	} else {
@@ -534,7 +549,7 @@ fn (mut service Service) search_raw_log_with_header(m meta.IndexMapping, query_s
 	log.info("search $m.name buckets by $query_str, total buckets: $buckets.len, elapsed: $elapsed")
 	mut result := []structs.LogModel{}
 	for bucket in buckets {
-		logs := index.safe_file.read_by_line[string](bucket.file, fn (line string) ?string {
+		logs := file.read_by_line[string](bucket.file, fn (line string) ?string {
 			return line
 		})!
 		

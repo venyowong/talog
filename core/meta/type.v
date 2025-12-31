@@ -1,7 +1,6 @@
 module meta
 
 import time
-import venyowong.linq
 
 pub enum LogType {
 	raw
@@ -39,7 +38,7 @@ pub fn DynamicValue.new(type string, value string, format string, is_array bool)
 	}
 	if type == "time" {
 		if is_array {
-			result.times = linq.map(result.strs, fn [format] (s string) time.Time {
+			result.times = result.strs.map(fn [format] (s string) time.Time {
 				if format.len > 0 {
 					return time.parse_format(s, format) or {return time.Time{}}
 				} else {
@@ -55,7 +54,7 @@ pub fn DynamicValue.new(type string, value string, format string, is_array bool)
 		}
 	} else if type == "number" {
 		if is_array {
-			result.nums = linq.map(result.strs, fn (s string) f64 {
+			result.nums = result.strs.map(fn (s string) f64 {
 				return s.f64()
 			})
 		} else {

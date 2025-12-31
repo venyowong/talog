@@ -9,7 +9,6 @@ import log
 import models
 import time
 import veb
-import venyowong.linq
 import x.json2
 
 const cacheable_type := [
@@ -69,7 +68,7 @@ mut:
 }
 
 pub fn App.new(service &core.Service, adm_pwd string, allow_list []string, jwt_secret string) App {
-	cidrs := linq.map(allow_list, fn (rule string) CIDR {return CIDR.parse(rule) or {CIDR{}}})
+	cidrs := allow_list.map(fn (rule string) CIDR {return CIDR.parse(rule) or {CIDR{}}})
 	log.info("talog Http App setup...")
 
 	return App {

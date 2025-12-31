@@ -38,7 +38,7 @@ transforms:
     source: |
       .message = replace!(.message, "\r\n", "\n")
       .message = replace!(.message, r'\r+$', "")
-      .name = "eap2"
+      .name = "eap"
       .log_type = "raw"
       .parse_log = true
       .log = .message
@@ -52,19 +52,3 @@ sinks:
     uri: "http://10.8.29.146:26382/index/logs2"
     encoding:
       codec: "json"
-  # es:
-  #   type: "elasticsearch"
-  #   inputs:
-  #     - "parsed"
-  #   endpoints: 
-  #     - "https://10.8.28.206:9200"
-  #   bulk:
-  #     index: "eqp_simulators"
-  #   auth:
-  #     strategy: "basic"
-  #     user: "elastic"
-  #     password: "JBOWisAf7N*wwGRVH=7z"
-  #   tls:
-  #     ca_file: "D:\\logstash-9.0.1\\http_ca.crt"
-  #   request:
-  #     timeout_secs: 60

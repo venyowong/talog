@@ -18,12 +18,11 @@ mut:
 	mutex sync.RwMutex @[json: '-']
 	need_save bool @[json: '-']
 	path string @[json: '-']
-	safe_file concurrent.SafeFile = concurrent.SafeFile{} @[json: '-']
 	wg &sync.WaitGroup = sync.new_waitgroup() @[json: '-']
 pub mut:
-	name string
-	tries map[string]&structs.Trie
 	buckets map[string]structs.Bucket
+	name string
+	shards concurrent.AsyncMap[structs.Shard]
 }
 
 pub fn (mut index Index) setup(base_path string) ! {
@@ -46,7 +45,7 @@ pub fn (mut index Index) setup(base_path string) ! {
 		log.error("Cannot decode $index.index_file_path: $err")
 		return
 	}
-	index.tries = index_object.tries.clone()
+	index.shards = index_object.shards
 	index.buckets = index_object.buckets.clone()
 }
 
@@ -61,13 +60,14 @@ pub fn (mut idx Index) destroy() ! {
 	idx.mutex.lock()
 	defer {idx.mutex.unlock()}
 
+	file.close_channels()
 	os.rmdir_all(idx.path)!
 }
 
 pub fn (mut index Index) get_all_logs[T](map_log fn (line string, tags []structs.Tag) T) ![]T {
 	mut result := []T{}
 	for bucket in index.buckets.values() {
-		logs := index.safe_file.read_by_line[T](bucket.file, fn [bucket, map_log] [T] (line string) ?T {
+		logs := file.read_by_line[T](bucket.file, fn [bucket, map_log] [T] (line string) ?T {
 			return map_log(line, bucket.tags)
 		})!
 		result << logs
@@ -82,21 +82,15 @@ pub fn (mut index Index) get_buckets(tag structs.Tag) []structs.Bucket {
 	if tag.label.len == 0 {
 		return index.buckets.values()
 	}
-	if tag.label !in index.tries {
-		return []structs.Bucket{}
-	}
 
-	mut trie := unsafe{index.tries[tag.label]}
-	if trie.is_default() {
-		index.tries[tag.label] = &trie
-	}
-	return trie.get_buckets(tag.value)
+	mut s := index.shards.get(tag.label) or { return []structs.Bucket{} }
+	return s.get_buckets(tag.value)
 }
 
 pub fn (mut index Index) get_logs[T](buckets []structs.Bucket, map_log fn (line string, tags []structs.Tag) T) ![]T {
 	mut result := []T{}
 	for bucket in buckets {
-		logs := index.safe_file.read_by_line[T](bucket.file, fn [bucket, map_log] [T] (line string) ?T {
+		logs := file.read_by_line[T](bucket.file, fn [bucket, map_log] [T] (line string) ?T {
 			return map_log(line, bucket.tags)
 		})!
 		result << logs
@@ -107,15 +101,9 @@ pub fn (mut index Index) get_logs[T](buckets []structs.Bucket, map_log fn (line 
 pub fn (mut index Index) get_tag_values(label string) []string {
 	index.mutex.rlock()
 	defer {index.mutex.runlock()}
-	if label !in index.tries {
-		return []string{}
-	}
 
-	mut trie := unsafe{index.tries[label]}
-	if trie.is_default() {
-		index.tries[label] = &trie
-	}
-	return trie.get_leaves()
+	mut s := index.shards.get(label) or { return []string{} }
+	return s.get_values()
 }
 
 pub fn (mut index Index) push(tags []structs.Tag, logs ...string) {
@@ -123,20 +111,18 @@ pub fn (mut index Index) push(tags []structs.Tag, logs ...string) {
 		log.error("failed to new bucket $index.name $index.path $tags")
 		return
 	}
+	if !os.exists(bucket.file) {
+		for tag in tags {
+			mut s := index.shards.get_or_create(tag.label, fn () structs.Shard { return structs.Shard{} })
+			if s.append_bucket(tag.value, bucket) {
+				index.need_save = true
+			}
+		}
+
+		spawn index.flush()
+	}
 	file.append_by_chan(bucket.file, ...logs)
 	index.buckets[bucket.key] = bucket
-	for tag in tags {
-		mut trie := &structs.Trie{}
-		if tag.label !in index.tries {
-			index.tries[tag.label] = trie
-		} else {
-			trie = unsafe{index.tries[tag.label]}
-		}
-		if trie.append(tag.value, bucket) {
-			index.need_save = true
-		}
-	}
-	spawn index.flush()
 }
 
 pub fn (mut index Index) remove_bucket(key string) ! {
@@ -152,15 +138,11 @@ pub fn (mut index Index) remove_bucket(key string) ! {
 	defer {index.wg.done()}
 
 	for tag in bucket.tags {
-		if tag.label !in index.tries {
-			continue
-		}
-
-		mut trie := unsafe{index.tries[tag.label]}
-		trie.remove_bucket(tag.value, key)
+		mut s := index.shards.get(tag.label) or {continue}
+		s.remove_bucket(tag.value, key)
 	}
 
-	index.safe_file.rm(bucket.file)!
+	file.close_channel(bucket.file)
 }
 
 pub fn (mut index Index) remove(q query.Query) ! {
@@ -181,7 +163,7 @@ pub fn (mut index Index) save() ! {
 	}
 
 	log.debug("Talog index [$index.name] saving...")
-	index.safe_file.write_file(index.index_file_path, json.encode(index))!
+	os.write_file(index.index_file_path, json.encode(index))!
 }
 
 pub fn (mut index Index) search(q query.Query) ![]structs.Bucket {
@@ -238,18 +220,12 @@ pub fn (mut index Index) search_logs[T](q query.Query, map_log fn (line string, 
 	buckets := index.search(q)!
 	mut result := []T{}
 	for bucket in buckets {
-		logs := index.safe_file.read_by_line[T](bucket.file, fn [bucket, map_log] [T] (line string) ?T {
+		logs := file.read_by_line[T](bucket.file, fn [bucket, map_log] [T] (line string) ?T {
 			return map_log(line, bucket.tags)
 		})!
 		result << logs
 	}
 	return result
-}
-
-fn (mut idx Index) append_logs(path string, logs []string) {
-	idx.safe_file.append(path, ...logs) or {
-		log.error("failed to append logs to file $path")
-	}
 }
 
 fn (mut index Index) flush() {

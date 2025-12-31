@@ -40,6 +40,24 @@ Commands:
 
 ## docs
 
-Because my english is poor, I am unable to accurately describe the core principles in English, so I use Chinese to do it.
+- 中文版本
+  - [index](./docs/index_cn.md)
+  - [为什么选择 vlang](./docs/why_vlang_cn.md)
+- English Version(Translated by AI from chinese version)
+  - [index](./docs/index.md)
+  - [Why Choose vlang](./docs/why_vlang.md)
 
-[Documents](./docs/index.md)
+## build from source
+
+1. [install v](https://github.com/vlang/v)
+2. install dependencies
+    ```
+    v install venyowong.concurrent
+    v install venyowong.file
+    v install venyowong.linq
+    ```
+    If your network is limited, you can clone [venyowong.concurrent](https://github.com/venyowong/concurrent)、[venyowong.linq](https://github.com/venyowong/linq)、[venyowong.query](https://github.com/venyowong/query) into `~/.vmodules`
+3. git clone https://github.com/venyowong/talog
+4. change pwd into talog folder `cd talog`
+5. build source code `v .`
+6. you will get talog/talog.exe(executable program)

@@ -1,72 +1,141 @@
-# 介绍
+# Introduction
 
-开发 talog 是为了解决在个人开发者云服务资源有限，无法部署类似 elk 这种重量级的日志平台。talog 参考了 loki 的思路，主要是通过为日志打标签的方式，对日志进行归类，具有相同标签的日志，会被存放到同一个 bucket 文件，然后将 bucket 文件名存放在每个标签的字典树中，以便能够快速查找。
+talog is developed to address the issue where individual developers have limited cloud service resources and cannot deploy heavyweight logging platforms like ELK. Referencing the design philosophy of Loki, talog primarily categorizes logs by tagging them. Logs with the same tags are stored in the same bucket file, and the bucket file name is stored in a trie structure for each tag to enable fast lookup.
 
-### 示例
+### Example
 
 ```
-日志：[2025-11-14 13:16:40.248 +08:00] [INF] Talogger 48590785 init.
-标签：
+log：[2025-11-14 13:16:40.248 +08:00] [INF] Talogger 48590785 init.
+tags：
 - date: 20251114
 - level: INF
 ```
 
-talog 会将以上日志存放到 key 为 a1de2ce0dee10d7728dfb415ac4c5e38 的 bucket 文件中，其实就是会将日志追加到 a1de2ce0dee10d7728dfb415ac4c5e38.log 文件中
+talog stores the above log in a bucket file with the key `a1de2ce0dee10d7728dfb415ac4c5e38` (essentially appending the log to `a1de2ce0dee10d7728dfb415ac4c5e38.log`).
 
 `a1de2ce0dee10d7728dfb415ac4c5e38 = MD5(date:20251114;level:INF)`
 
-并且 talog 会分别对两个标签维护对应的字典树，即通过 `date: 20251114` 或 `level: INF` 均可找到对应 bucket，也就可以找到相应日志了。
+Additionally, talog maintains a separate trie for each tag. This means the corresponding bucket (and thus the relevant logs) can be found using either `date: 20251114` or `level: INF`.
 
-## 标签
+## Tag
 
-使用 talog 时需要注意日志标签的建立，类似于 es 的 index mapping，对于标签有以下几点建议：
+When using talog, it is important to carefully design log tags—similar to index mapping in Elasticsearch. The following recommendations apply to tag usage:
 
-- 日志不要打上过多或过少标签
-- 标签值的枚举数量应该是有限的
+- Avoid using too many or too few tags for logs
+- The number of enumerations for tag values should be limited
 
-### 避免 bucket 文件过大
+### Avoid Overly Large Bucket Files
 
-如果日志的标签过少，例如只有一个 Level，而枚举值只有 INF、WRN、ERR，会导致只有三个 bucket 文件，INFO 日志通常是最多的，因此很有可能对应的 bucket 文件会迅速增长到不适合一次性读取的量级，这样会导致后续查询时性能下降。
+If logs have too few tags (e.g., only a `Level` tag with just three enumerations: INF, WRN, ERR), only three bucket files will be created. INFO logs are typically the most numerous, so the corresponding bucket file may grow rapidly to an unmanageable size, leading to degraded query performance.
 
-### 避免 bucket 文件过小
+### Avoid Overly Small Bucket Files
 
-如果日志的标签过多，或标签值过于细化(即标签值枚举数量较多甚至趋于无限)，会导致产生很多 bucket 文件，而每个 bucket 文件可能只保存了一条记录，如此，后续查询时，会产生大量文件读取操作，影响查询性能。
+If logs have too many tags, or if tag values are overly granular (with a large or even infinite number of enumerations), numerous bucket files will be created—each potentially storing only a single log entry. This results in a large number of file read operations during queries, impacting performance.
 
-### 建议标签
+### Recommended Tags
 
-- name：项目名称
-- level：日志级别
-- month：YYYYMM
-- date：YYYYMMDD
+- name: Project name
+- level: Log level
+- month: YYYYMM
+- date: YYYYMMDD
 
-## 核心原理
+## Core Principles
+
+Talog has three core data structures: index, shard, and bucket.
+
+### Bucket
+
+Talog groups logs with identical tags into the same bucket, where each bucket has a corresponding key and file.
+
+### BucketSet
+
+Talog implements a `BucketSet` structure to store a unique collection of buckets, which is essentially implemented using a map for deduplication.
+
+### Shard
+
+Talog splits data into multiple shards based on different tag dimensions. Each shard stores all tag values and their corresponding bucket collections.
+For example, if a log is tagged with `date:20251227;level:INFO;name:TEST_LOG`, Talog stores the log content in the bucket a27f8005db76091215efc91c3ef8fe52.log.
+
+`a27f8005db76091215efc91c3ef8fe52 = MD5("date:20251227;level:INFO;name:TEST_LOG")`
+
+However, three shards will be associated with this bucket:
+
+shard name|tag value|bucket key
+---|---|---
+date|20251227|a27f8005db76091215efc91c3ef8fe52
+level|INFO|a27f8005db76091215efc91c3ef8fe52
+name|TEST_LOG|a27f8005db76091215efc91c3ef8fe52
+
+The table above only illustrates the association relationship; the actual storage structure can be referenced in the following code:
+
+```
+pub struct Bucket {
+pub:
+	file string
+	index string
+	key string
+	tags []Tag
+}
+
+pub struct BucketSet {
+mut:
+	buckets []Bucket
+	mutex sync.RwMutex @[json: '-']
+}
+
+pub struct Shard {
+mut:
+	m concurrent.AsyncMap[BucketSet]
+}
+```
+
+### Index
+
+The concept of an index in Talog aligns with Elasticsearch, it stores all buckets used for log storage and maintains a corresponding shard for each tag dimension.
 
 ```
 pub struct Trie {
 pub mut:
-	char string
-	nodes []&Trie
-	buckets map[string]Bucket
+	buckets map[string]structs.Bucket
+	name string
+	shards concurrent.AsyncMap[structs.Shard]
 }
 ```
 
-talog 最核心的数据结构为 Trie，该结构为普通的字典树，虽然 talog 支持的标签值有 string/number/time 三种类型，但是底层均是作为字符串，所以所有的数据都可以使用字典树去构建索引。每一个节点都会维护当前标签值所对应的 bucket 列表。
+### Additional Notes
 
-例如：`date: 20251114` 关联了 `List1 {bucket1, bucket2, bucket3}`，`level: INF` 关联了 `List2 {bucket2, bucket4, bucket5}`，即 bucket1、bucket2、bucket3 是 2025-11-14 的日志，而 bucket2、bucket4、bucket5 为 INFO 日志。当想要查询 2025-11-14 的 INFO 日志时，可使用 `date == 20251114 && level == INF`, talog 会先查询到 List1、List2，然后将二者取交集，得到 bucket2，因此可知，bucket2 中存储的是 2025-11-14 的 INFO 日志。
+Although Talog supports three tag value types (string/number/time), all are treated as strings at the underlying level. Therefore, all data can use shards to build indexes.
+Talog uses a simple indexing method to achieve fast query performance.
 
-talog 使用了简单的索引方式，因此才能得到较快的查询性能，但这也带来了日志标签的局限性。
+For example:`date: 20251114` is associated with List1 {bucket1, bucket2, bucket3}, `level: INF` is associated with List2 {bucket2, bucket4, bucket5}. This means bucket1, bucket2, and bucket3 contain logs from 2025-11-14, while bucket2, bucket4, and bucket5 contain INFO logs. To query INFO logs from 2025-11-14 using the condition `date == 20251114 && level == INF`, talog first retrieves List1 and List2, then computes their intersection (resulting in bucket2). Thus, bucket2 contains the INFO logs from 2025-11-14.
 
-**如果标签枚举值数量较多，就会导致字典树层数较深，从而导致索引数据增大，影响索引 setup 效率**
+**A large number of tag enumerations will result in a deep trie structure, increasing index data size and impacting index setup efficiency.**
 
-## 优势
+## Advantages
 
-- 体积小，使用 vlang 语言开发，编译出来的可执行文件只有 4M
-- 不依赖任何运行环境
-- 日志索引性能能够满足小型项目需求
+- Small footprint: Developed in V language, the compiled executable is only 4MB
+- Zero runtime dependencies
+- Log indexing performance sufficient for small-scale projects
+
+  - /index/logs
+
+    This endpoint accepts multiple logs with identical tags. For example, to store fund NAV data in an index named `fund_nav` using the fund code as a unique tag `fund_code:xxxxxx`, this endpoint can be used to improve indexing efficiency.
+    Based on the following test results, indexing a single log takes an average of 0.0134ms (this result is for reference only, as multiple logs trigger only one indexing process when using this endpoint):
+    
+    ```
+    2025-12-27T00:36:26.021000Z [INFO ] index fund_nav logs, total logs: 2319, elapsed: 28
+    2025-12-27T00:36:26.480000Z [INFO ] index fund_nav logs, total logs: 3225, elapsed: 55
+    2025-12-27T00:36:26.830000Z [INFO ] index fund_nav logs, total logs: 2767, elapsed: 23
+    2025-12-27T00:36:27.270000Z [INFO ] index fund_nav logs, total logs: 1768, elapsed: 24
+    2025-12-27T00:36:27.603000Z [INFO ] index fund_nav logs, total logs: 3610, elapsed: 47
+    2025-12-27T00:36:28.042000Z [INFO ] index fund_nav logs, total logs: 2539, elapsed: 29
+    2025-12-27T00:36:28.419000Z [INFO ] index fund_nav logs, total logs: 2763, elapsed: 40
+    2025-12-27T00:36:28.712000Z [INFO ] index fund_nav logs, total logs: 1577, elapsed: 30
+    ```
 
   - /index/logs2
   
-    该接口接收多条日志，但是会对每一条日志单独索引，因此测试的是索引一条日志所需要的平均时长，从以下日志可计算出，平均索引一条日志需要 0.06ms
+    This endpoint accepts multiple logs but indexes each one individually. From the following logs, indexing a single log takes an average of 0.06ms:
 
     ```
     2025-11-26T03:10:31.946000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 1056
@@ -74,20 +143,20 @@ talog 使用了简单的索引方式，因此才能得到较快的查询性能�
     2025-11-26T03:10:37.454000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 442
     2025-11-26T03:11:32.538000Z [DEBUG] index multi logs, total logs: 1894, elapsed: 92
     ```
-- 日志查询效率高
+- High log query efficiency
   
   ```
   2025-11-26T03:18:48.954000Z [DEBUG] search eap2 buckets by level == ERR, total buckets: 6, elapsed: 0
   2025-11-26T03:18:49.101000Z [DEBUG] search eap2 logs by level == ERR, total logs: 3067, elapsed: 147
   ```
 
-  通过以上日志可看出，talog 查找对应的 bucket 文件是非常快的，不到 1ms 就完成了，剩下的时间都用在解析日志上了，因此建议一个 bucket 不要存储太多日志，这样才能够保证查询的效率
+  The logs above show that talog locates corresponding bucket files extremely quickly (completing in less than 1ms). The remaining time is spent parsing logs. For this reason, it is recommended that each bucket does not store an excessive number of logs to ensure optimal query efficiency.
 
-- 使用 vlang 官方 web 框架 veb 开发 api，响应速度快
+- Built with Vlang's official web framework (veb) for fast API response times
 
 ## api
 
-在索引日志之前，需要先调用 `/index/mapping` 接口，配置索引元数据
+Before indexing logs, you must first call the `/index/mapping` endpoint to configure index metadata.
 
 ### /index/mapping
 
@@ -126,25 +195,25 @@ content-type: application/json
 }
 ```
 
-log_type：日志类型，raw-普通文本日志 json-结构化数据
+log_type: Log type (raw for plain text logs, json for structured data)
 
-log_header：索引后的日志前缀，当一条日志有多行时，需要配置该字段
+log_header: Prefix for indexed logs (required if logs contain multiple lines)
 
-log_regex：日志的正则表达式，用于解析日志，从日志中提取字段
+log_regex: Regular expression for parsing logs and extracting fields
 
-fields：日志解析后的字段，有两种来源，一个是从日志本身解析出来的字段，比如普通文本日志通过 log_regex 解析出来，或者 json 数据反序列化而得，另一个是日志标签。只配置标签字段甚至不配置任何字段，都不影响索引，但是 talog 自带的后台页面是根据这边的配置去展示字段的，因此建议配置齐全，如果配置不全，会导致部分字段无法展示
+fields: Parsed log fields (two sources: extracted from logs themselves—either via log_regex for plain text logs or deserialization for JSON data—or log tags). Configuring only tag fields (or no fields at all) does not affect indexing, but talog's built-in admin interface uses these configurations to display fields. For this reason, it is recommended to configure all fields; incomplete configuration may result in some fields not being displayed.
 
-fields.tag_name：指定了 tag_name，talog 会根据字段值生成对应的标签
+fields.tag_name：When specified, talog generates corresponding tags based on field values
 
-fields.type：字段类型，talog 支持 string、number、time 三种类型
+fields.type：Field type (talog supports string, number, and time)
 
-fields.parse_format：如果是 time 字段，talog 会使用 parse_format 去解析字符串，如果未配置则默认会使用 `YYYY-MM-DD HH:mm:ss` 格式进行解析
+fields.parse_format：For time fields, talog parses the string using this format (defaults to `YYYY-MM-DD HH:mm:ss` if not configured)
 
-fields.index_format：如果是 time 字段，并且指定了 tag_name，则会使用 index_format 去生成标签值，如果未配置默认会使用 `YYYY-MM-DD HH:mm:ss` 格式
+fields.index_format：For time fields with a specified tag_name, this format is used to generate tag values (defaults to `YYYY-MM-DD HH:mm:ss` if not configured)
 
 ### /index
 
-索引单条日志
+Index a single log entry
 
 ```
 POST http://127.0.0.1:26382/index
@@ -163,15 +232,15 @@ content-type: application/json
 }
 ```
 
-tags：可以在调用此接口时，额外指定自定义标签
+tags：Custom tags can be specified additionally when calling this endpoint
 
 ### /index/logs
 
-索引多条日志，与索引单条日志的唯一差别在于 log 改为 logs，接收一个字符串数组，当有多条日志，但是标签又是相同的，使用该接口可以获得最佳的索引效率
+Index multiple log entries. The only difference from indexing a single log is that log is replaced with logs (accepting an array of strings). For multiple logs with identical tags, using this endpoint provides optimal indexing efficiency.
 
 ### /index/logs2
 
-索引多条日志，数据结构与 `/index` 一致，但请求数据接收的是数组
+Index multiple log entries. The data structure matches `/index`, but the request body accepts an array of objects (each corresponding to a single log entry).
 
 ### /index/remove
 
@@ -179,7 +248,7 @@ tags：可以在调用此接口时，额外指定自定义标签
 POST http://127.0.0.1:26382/index/remove?name=
 ```
 
-物理删除整个索引
+Physically deletes an entire index (specify the index name via the name query parameter).
 
 ### /search/logs
 
@@ -187,4 +256,4 @@ POST http://127.0.0.1:26382/index/remove?name=
 http://localhost:26382/search/logs?name=&log_type=raw&query=
 ```
 
-query：只支持对于标签字段的查询，查询语句格式为 `(key1 > value1 || key2 == 'value2') && key3 != "value3"`，运算符支持 `>` `>=` `<` `<=` `==` `!=` `||` `&&` `in` `like`
+query：Only supports queries on tag fields. The query syntax format is `(key1 > value1 || key2 == 'value2') && key3 != "value3"`，Supported operators include: `>` `>=` `<` `<=` `==` `!=` `||` `&&` `in` `like`
