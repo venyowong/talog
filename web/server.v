@@ -5,7 +5,7 @@ import compress.gzip
 import core
 import core.meta
 import json
-import log
+import venyowong.log
 import models
 import time
 import veb

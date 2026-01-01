@@ -1,0 +1,12 @@
+{
+	"stdout": {
+		"enabled": true,
+		"level": "trace"
+	},
+	"file": [
+		{
+			"path": "logs/info-{dt:YYYYMMDD}.txt",
+			"level": "info"
+		}
+	]
+}

@@ -113,7 +113,7 @@ For example:`date: 20251114` is associated with List1 {bucket1, bucket2, bucket3
 
 ## Advantages
 
-- Small footprint: Developed in V language, the compiled executable is only 4MB
+- Small footprint: Developed in V language, the compiled executable is only 5MB
 - Zero runtime dependencies
 - Log indexing performance sufficient for small-scale projects
 

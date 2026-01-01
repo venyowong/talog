@@ -1,7 +1,7 @@
 module core
 
 import json
-import log
+import venyowong.log
 import structs
 import os
 import sync
@@ -111,6 +111,7 @@ pub fn (mut index Index) push(tags []structs.Tag, logs ...string) {
 		log.error("failed to new bucket $index.name $index.path $tags")
 		return
 	}
+
 	if !os.exists(bucket.file) {
 		for tag in tags {
 			mut s := index.shards.get_or_create(tag.label, fn () structs.Shard { return structs.Shard{} })
@@ -133,6 +134,7 @@ pub fn (mut index Index) remove_bucket(key string) ! {
 		return
 	}
 	index.need_save = true
+	index.buckets.delete(key)
 	index.wg.add(1)
 	spawn index.flush()
 	defer {index.wg.done()}

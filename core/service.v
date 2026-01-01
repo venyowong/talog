@@ -2,7 +2,7 @@ module core
 
 import arrays
 import json
-import log
+import venyowong.log
 import meta
 import structs
 import os
