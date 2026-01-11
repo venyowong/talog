@@ -178,8 +178,8 @@ pub fn (mut service Service) mapping[T]() ! {
 			name: field.name
 			type: get_field_type(field)
 		}
-		tag := get_attribute(field, "tag", field.name)
-		if tag != none {
+		tag := get_attribute(field, "tag", field.name) or {""}
+		if tag.len > 0 {
 			field_mapping.tag_name = tag
 		}
 		index_format := get_attribute(field, "index_format", "") or {""}
@@ -220,8 +220,8 @@ pub fn (mut service Service) remove_index(name string) ! {
 pub fn (mut service Service) save_log[T](value T) {
 	mut tags := []structs.Tag{}
 	$for field in T.fields {
-		tag := get_attribute(field, "tag", field.name)
-		if tag != none {
+		tag := get_attribute(field, "tag", field.name) or {""}
+		if tag.len > 0 {
 			mut label := tag
 			mut value_str := ""
 			$if field.typ is time.Time {
