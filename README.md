@@ -55,8 +55,10 @@ Commands:
     v install venyowong.concurrent
     v install venyowong.file
     v install venyowong.linq
+    v install venyowong.log
+    v install venyowong.query
     ```
-    If your network is limited, you can clone [venyowong.concurrent](https://github.com/venyowong/concurrent)、[venyowong.linq](https://github.com/venyowong/linq)、[venyowong.query](https://github.com/venyowong/query) into `~/.vmodules`
+    If your network is limited, you can clone [venyowong.concurrent](https://github.com/venyowong/concurrent)、[venyowong.file](https://github.com/venyowong/file)、[venyowong.linq](https://github.com/venyowong/linq)、[venyowong.log](https://github.com/venyowong/log)、[venyowong.query](https://github.com/venyowong/query) into `~/.vmodules`
 3. git clone https://github.com/venyowong/talog
 4. change pwd into talog folder `cd talog`
 5. build source code `v .`
