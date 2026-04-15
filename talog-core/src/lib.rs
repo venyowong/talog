@@ -1,7 +1,7 @@
 mod bucket;
 mod file;
 mod index;
-mod meta_data;
+mod meta;
 mod service;
 mod shard;
 mod tag;
@@ -9,7 +9,7 @@ mod tag;
 pub use bucket::*;
 pub use file::*;
 pub use index::*;
-pub use meta_data::*;
+pub use meta::*;
 pub use service::*;
 pub use shard::*;
 pub use tag::*;

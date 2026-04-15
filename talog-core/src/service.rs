@@ -25,6 +25,7 @@ pub struct Service {
 
 impl Service {
     pub async fn new(data_path: &str) -> Self {
+        fs::create_dir_all(data_path).unwrap();
         let mut map: HashMap<String, Index> = HashMap::new();
         let dirs = fs::read_dir(data_path).unwrap();
         for entry in dirs {
@@ -64,13 +65,18 @@ impl Service {
     /// get index mappings by log type(Json/Raw)
     pub async fn get_mappings(&self, log_type: &LogType) -> Result<Vec<IndexMapping>, Box<dyn Error>> {
         let guard = self.get_map_read_guard()?;
-        let mappings: Vec<IndexMapping> = guard.get(INDEX_MAPPING_INDEX_NAME).unwrap()
-            .search_logs(&format!("log_type = '{log_type}'"), Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
-            .iter().filter(|x| x.is_some())
-            .map(|x| x.as_ref().unwrap())
-            .cloned()
-            .collect();
-        Ok(mappings)
+        match guard.get(INDEX_MAPPING_INDEX_NAME) {
+            None => { Ok(Vec::new()) }
+            Some(index) => {
+                let mappings: Vec<IndexMapping> = index.search_logs(&format!("log_type = '{log_type}'"),
+                        Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
+                    .iter().filter(|x| x.is_some())
+                    .map(|x| x.as_ref().unwrap())
+                    .cloned()
+                    .collect();
+                Ok(mappings)
+            }
+        }
     }
 
     pub async fn get_tag_values(&self, name: &str, label: &str) -> Option<Vec<String>> {
@@ -123,6 +129,23 @@ impl Service {
         self.index_log_with_mapping(&mapping, tags, parse, log)
     }
 
+    /// save logs
+    /// 
+    /// when you choose not to parse, all logs will be written at once, resulting in the highest performance
+    pub async fn index_logs(&self, log_type: &LogType, name: &str, tags: &Vec<Tag>,
+                            parse: bool, logs: &Vec<String>) -> Result<(), Box<dyn Error>> {
+        if parse {
+            for log in logs {
+                if let Err(e) = self.index_log(log_type, name, tags, parse, log).await {
+                    warn!("failed to index log({log}) into {name}: {e}");
+                }
+            }
+            Ok(())
+        } else {
+            self.index_raw_logs(name, tags, logs)
+        }
+    }
+
     pub fn index_log_with_mapping(&self, mapping: &IndexMapping, tags: &Vec<Tag>, parse: bool, log: &str)
         -> Result<(), Box<dyn Error>> {
         if parse {
@@ -135,7 +158,7 @@ impl Service {
             }
         }
 
-        self.index_raw_log(&mapping.name, tags, log)
+        self.index_raw_logs(&mapping.name, tags, &vec![log.to_string()])
     }
 
     /// generate an index mapping relationship based on the reflection characteristics of the type
@@ -179,6 +202,7 @@ impl Service {
         let mappings = T::field_mappings();
         let map: HashMap<String, bool> = mappings.into_iter().map(|x| (x.name, x.is_tag)).collect();
         let mut tags: Vec<Tag> = Vec::new();
+        serde_json::to_value(t);
         for (name, value) in t.iter() {
             if let Some(b) = map.get(name) && *b {
                 tags.push(Tag {
@@ -295,7 +319,7 @@ impl Service {
             }
         }
         
-        self.index_raw_log(&mapping.name, &tags, log)
+        self.index_raw_logs(&mapping.name, &tags, &vec![log.to_string()])
     }
 
     fn index_log_with_regex(&self, mapping: &IndexMapping, mut tags: &Vec<Tag>, log: &str) -> Result<(), Box<dyn Error>> {
@@ -318,14 +342,14 @@ impl Service {
             }
         }
 
-        self.index_raw_log(&mapping.name, &tags, log)
+        self.index_raw_logs(&mapping.name, &tags, &vec![log.to_string()])
     }
 
-    fn index_raw_log(&self, name: &str, tags: &Vec<Tag>, log: &str) -> Result<(), Box<dyn Error>> {
+    fn index_raw_logs(&self, name: &str, tags: &Vec<Tag>, logs: &Vec<String>) -> Result<(), Box<dyn Error>> {
         let mut guard = self.get_map_write_guard()?;
         guard.entry(name.to_string())
             .or_insert_with(|| Index::new(&self.data_path, name))
-            .push(&tags, &vec![log.to_string()])?;
+            .push(&tags, logs)?;
         Ok(())
     }
 }

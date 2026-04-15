@@ -11,11 +11,9 @@ pub fn derive_struct_meta(input: TokenStream) -> TokenStream {
     let mut index = struct_name.to_string();
     for attr in &input.attrs {
         if attr.path().is_ident("index") {
-            let _ = attr.parse_nested_meta(|meta| {
-                let s = meta.value()?.parse::<syn::LitStr>()?;
-                index = s.value();
-                Ok(())
-            });
+            if let Ok(lit_str) = attr.parse_args::<syn::LitStr>() {
+                index = lit_str.value();
+            }
         }
     }
 
@@ -47,11 +45,11 @@ pub fn derive_struct_meta(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         impl TalogIndex for #struct_name {
             fn field_mappings() -> Vec<FieldMapping> {
-                vec!( #(#fields),* )
+                vec![ #(#fields),* ]
             }
 
-            fn index_name() -> &'static str {
-                #index
+            fn index_name() -> String {
+                #index.to_string()
             }
         }
     };

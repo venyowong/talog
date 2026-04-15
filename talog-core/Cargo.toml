@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "talog-core"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,7 +9,7 @@ fexpr = "0.1.2"
 hex = "0.4.3"
 itertools = "0.14.0"
 log = "0.4.29"
-meta = { path = "../meta" }
+talog-macros = { path = "../talog-macros" }
 md-5 = "0.11.0"
 once_cell = "1.21.4"
 serde = { version = "1.0.228", features = ["derive"] }

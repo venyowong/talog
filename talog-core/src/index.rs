@@ -200,9 +200,11 @@ impl Index {
     /// search logs by expr, please refer to [fexpr](https://github.com/mnaufalhilmym/fexpr) for expr rules
     pub fn search_logs<'a, T>(&self, expr: &str, log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, Box<dyn Error>> {
         let groups = fexpr::parse(expr)?;
-        let buckets = self.search(&ExprGroupItem::ExprGroups(groups))
-            .ok_or(format!("failed to search buckets by expr: {expr}"))?;
-        Self::get_logs(&buckets, log_mapper)
+        let buckets = self.search(&ExprGroupItem::ExprGroups(groups));
+        match buckets {
+            None => { Ok(Vec::new()) }
+            Some(buckets) => { Self::get_logs(&buckets, log_mapper) }
+        }
     }
 
     fn get_logs<'a, T>(buckets: &[Bucket], log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, Box<dyn Error>> {
