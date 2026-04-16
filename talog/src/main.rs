@@ -3,6 +3,7 @@ pub mod layers;
 pub mod jwt;
 pub mod models;
 pub mod admin;
+pub mod index;
 
 use axum::Router;
 use log::info;
