@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Display, Formatter};
 use ::serde::{Deserialize, Serialize};
-use struct_iterable::Iterable;
+use serde::de::DeserializeOwned;
 use talog_macros::TalogIndex;
 
 pub const INDEX_MAPPING_INDEX_NAME: &str = "index_mapping";
@@ -18,7 +18,7 @@ pub enum FieldType {
     String
 }
 
-#[derive(Clone, Debug, Deserialize, Iterable, Serialize, TalogIndex)]
+#[derive(Clone, Debug, Deserialize, Serialize, TalogIndex)]
 #[index("index_mapping")]
 pub struct IndexMapping {
     pub fields: Vec<FieldMapping>,
@@ -35,7 +35,7 @@ pub enum LogType {
     Json
 }
 
-pub trait TalogIndex<'a> : Deserialize<'a> + Serialize {
+pub trait TalogIndex : DeserializeOwned + Serialize {
     fn field_mappings() -> Vec<FieldMapping>;
     fn index_name() -> &'static str;
 }

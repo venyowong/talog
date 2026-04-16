@@ -6,10 +6,8 @@ use chrono::Utc;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use log::{debug, warn};
-use regex::{Captures, Regex};
-use serde::Serialize;
+use regex::{Regex};
 use serde_json::{json, Value};
-use struct_iterable::Iterable;
 use crate::{FieldMapping, Index, IndexMapping, LogType, Tag, TalogIndex, INDEX_MAPPING_INDEX_NAME};
 
 pub struct LogModel {
@@ -112,7 +110,7 @@ impl Service {
     /// save the json of instance as `Json log` based on mapping
     pub fn index<T>(&self, t: &T) -> Result<(), Box<dyn Error>>
     where
-        T : Iterable + Serialize + TalogIndex + 'static {
+        T : TalogIndex + 'static {
         let mut guard = self.get_map_write_guard()?;
         let index_name = T::index_name();
         let tags = Self::parse_tags::<T>(t);
@@ -178,7 +176,7 @@ impl Service {
     /// ```
     pub async fn mapping<T>(&self) -> Result<(), Box<dyn Error>>
     where
-        T : Iterable + Serialize + TalogIndex + 'static {
+        T : TalogIndex + 'static {
         let mapping = Self::parse_mapping::<T>();
         if self.has_mapping_changed(&mapping).await? {
             self.index(&mapping)?;
@@ -198,20 +196,25 @@ impl Service {
     }
 
     /// parse tags of instance based on mapping
-    pub fn parse_tags<T: Iterable + TalogIndex + 'static>(t: &T) -> Vec<Tag> {
+    pub fn parse_tags<T: TalogIndex + 'static>(t: &T) -> Vec<Tag> {
         let mappings = T::field_mappings();
-        let map: HashMap<String, bool> = mappings.into_iter().map(|x| (x.name, x.is_tag)).collect();
-        let mut tags: Vec<Tag> = Vec::new();
-        serde_json::to_value(t);
-        for (name, value) in t.iter() {
-            if let Some(b) = map.get(name) && *b {
-                tags.push(Tag {
-                    label: name.to_string(),
-                    value: format!("{:?}", value)
-                })
+        match serde_json::to_value(t) {
+            Ok(value) => {
+                let mut tags: Vec<Tag> = Vec::new();
+                for mapping in mappings.iter().filter(|x| x.is_tag) {
+                    if let Some(v) = value.get(&mapping.name) {
+                        tags.push(Tag {
+                            label: mapping.name.clone(),
+                            value: v.as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| v.to_string())
+                        })
+                    }
+                }
+                tags
             }
+            Err(_) => { Vec::new() }
         }
-        tags
     }
 
     /// remove all bucket files of specified index but index file and index mapping

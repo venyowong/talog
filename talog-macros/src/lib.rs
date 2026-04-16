@@ -48,8 +48,8 @@ pub fn derive_struct_meta(input: TokenStream) -> TokenStream {
                 vec![ #(#fields),* ]
             }
 
-            fn index_name() -> String {
-                #index.to_string()
+            fn index_name() -> &'static str {
+                #index
             }
         }
     };

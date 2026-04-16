@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::sync::mpsc::{Sender};
-use std::sync::{mpsc, LockResult, Mutex, Once, OnceLock};
+use std::sync::{mpsc, Arc, LockResult, Mutex, Once, OnceLock};
 use std::{fs, thread};
 use std::error::Error;
 use std::path::Path;
+use std::thread::JoinHandle;
 use std::time::{Instant, Duration};
 use once_cell::sync::Lazy;
 use log::{info, warn};
@@ -22,19 +23,20 @@ pub enum Message {
 }
 
 static FILES: Lazy<Mutex<HashMap<String, FileState>>> = Lazy::new(|| {Mutex::new(HashMap::new())});
+static HANDLE: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
 static INIT: Once = Once::new();
-static SENDER: OnceLock<Sender<Message>> = OnceLock::new();
+static SENDER: OnceLock<Mutex<Option<Sender<Message>>>> = OnceLock::new();
 
 fn init() {
     INIT.call_once(|| {
         let (sender, receiver) = mpsc::channel();
-        SENDER.set(sender).unwrap();
+        SENDER.set(Mutex::new(Some(sender))).unwrap();
 
         // receive logs and write into files
-        thread::spawn(move || loop {
-            loop {
-                match receiver.recv() {
-                    Ok(Message::Append(path, line)) => {
+        let handle = thread::spawn(move || {
+            for message in receiver {
+                match message {
+                    Message::Append(path, line) => {
                         let p = path.clone();
                         match FILES.lock() {
                             Ok(mut files) => {
@@ -60,14 +62,14 @@ fn init() {
                             }
                         }
                     }
-                    Ok(Message::Overwrite(path, content)) => {
+                    Message::Overwrite(path, content) => {
                         if let Err(e) = fs::write(&path, content) {
                             warn!("failed to overwrite file({}): {}", &path, e);
                         } else {
                             info!("overwrite file {}", &path);
                         }
                     }
-                    Ok(Message::Remove(path)) => {
+                    Message::Remove(path) => {
                         match FILES.lock() {
                             Ok(mut files) => {
                                 files.remove(&path);
@@ -80,13 +82,10 @@ fn init() {
                             }
                         }
                     }
-                    Err(e) => {
-                        warn!("captured a RecvError: {}", e);
-                        thread::sleep(Duration::from_millis(100));
-                    }
                 }
             }
         });
+        HANDLE.set(Mutex::new(Some(handle))).unwrap();
     });
 
     // flush files and close temporarily unused files
@@ -123,6 +122,8 @@ fn init() {
 pub fn append_line(path: &str, line: &str) -> Result<(), Box<dyn Error>> {
     init();
     if let Some(sender) = SENDER.get() {
+        let guard = sender.lock()?;
+        let sender = guard.as_ref().unwrap();
         sender.send(Message::Append(path.to_string(), line.to_string()))?;
         Ok(())
     } else {
@@ -130,9 +131,36 @@ pub fn append_line(path: &str, line: &str) -> Result<(), Box<dyn Error>> {
     }
 }
 
+pub fn wait_for_done() {
+    if let Some(mutex) = SENDER.get() {
+        mutex.lock().unwrap().take();
+    }
+    if let Some(mutex) = HANDLE.get() {
+        let handle = mutex.lock()
+            .unwrap()
+            .take();
+        if let Some(handle) = handle {
+            handle.join().unwrap();
+            info!("file mod stop to consume messages")
+        }
+    }
+
+    let mut files = FILES.lock().ok();
+    if let Some(files) = files.as_mut() {
+        for file in files.values_mut() {
+            if file.writer.buffer().len() > 0 {
+                file.writer.flush().ok();
+            }
+        }
+    }
+    info!("files flushed");
+}
+
 pub fn overwrite(path: &str, content: &str) -> Result<(), Box<dyn Error>> {
     init();
     if let Some(sender) = SENDER.get() {
+        let guard = sender.lock()?;
+        let sender = guard.as_ref().unwrap();
         sender.send(Message::Overwrite(path.to_string(), content.to_string()))?;
         Ok(())
     } else {
@@ -143,6 +171,8 @@ pub fn overwrite(path: &str, content: &str) -> Result<(), Box<dyn Error>> {
 pub fn remove_file(path: &str) -> Result<(), Box<dyn Error>> {
     init();
     if let Some(sender) = SENDER.get() {
+        let guard = sender.lock()?;
+        let sender = guard.as_ref().unwrap();
         sender.send(Message::Remove(path.to_string()))?;
         Ok(())
     } else {

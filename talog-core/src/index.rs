@@ -235,9 +235,6 @@ impl Index {
 
 impl Drop for Index {
     fn drop(&mut self) {
-        if let Err(e) = self.store_index_file() {
-            warn!("failed to store index file({}) when dropping: {e}", self.path.to_string_lossy().to_string());
-        }
         if let Ok(mut guard) = self.shards.write() {
             guard.clear();
         }
