@@ -7,10 +7,12 @@ pub mod index;
 pub mod search;
 
 use std::net::SocketAddr;
-use axum::{middleware, Router, ServiceExt};
+use std::path::Path;
+use axum::{middleware, routing, Router, ServiceExt};
 use log::info;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
+use tower_http::services::ServeDir;
 use tracing::level_filters::LevelFilter;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::SubscriberExt;
@@ -29,6 +31,10 @@ async fn main() {
         .merge(admin::route())
         .nest("/index", index::route(state.clone()))
         .nest("/search", search::route(state.clone()))
+        .fallback_service(routing::get_service(
+            ServeDir::new(Path::new("./public"))
+                .append_index_html_on_directories(true)
+        ))
         .layer(cors_layer(&state.config.origins))
         .layer(CompressionLayer::new())
         .with_state(state);
