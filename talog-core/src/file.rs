@@ -91,7 +91,7 @@ fn init() {
     // flush files and close temporarily unused files
     thread::spawn(|| {
         loop {
-            thread::sleep(Duration::from_secs(5));
+            thread::sleep(Duration::from_secs(3));
 
             let mut files = FILES.lock().ok();
             if let Some(files) = files.as_mut() {

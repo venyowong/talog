@@ -4,8 +4,10 @@ pub mod jwt;
 pub mod models;
 pub mod admin;
 pub mod index;
+pub mod search;
 
-use axum::Router;
+use std::net::SocketAddr;
+use axum::{middleware, Router, ServiceExt};
 use log::info;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
@@ -22,11 +24,18 @@ async fn main() {
     init_log();
 
     let state = AppState::new().await;
+    let port = state.config.port.clone();
     let router = Router::new()
+        .merge(admin::route())
+        .nest("/index", index::route(state.clone()))
+        .nest("/search", search::route(state.clone()))
         .layer(cors_layer(&state.config.origins))
-        .layer(CompressionLayer::new());
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", state.config.port)).await.unwrap();
-    axum::serve(listener, router).await.unwrap();
+        .layer(CompressionLayer::new())
+        .with_state(state);
+    let address = format!("0.0.0.0:{}", port);
+    info!("starting server on {}", &address);
+    let listener = TcpListener::bind(address).await.unwrap();
+    axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 
     let service = Service::new("data").await;
     let indices = service.get_indices();

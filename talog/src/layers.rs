@@ -1,7 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::time::Duration;
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{header, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -10,10 +10,11 @@ use tower_http::cors::CorsLayer;
 use crate::jwt;
 use crate::server::AppState;
 
-pub async fn auth_layer(State(state): State<AppState>, request: Request, next: Next) -> Result<Response, StatusCode> {
+pub async fn auth_layer(ConnectInfo(remote_addr): ConnectInfo<SocketAddr>, 
+                        State(state): State<AppState>, request: Request, 
+                        next: Next) -> Result<Response, StatusCode> {
     // is remote ip within the allowed cidrs
-    let remote_addr = request.extensions().get::<SocketAddr>();
-    if let Some(remote_addr) = remote_addr && let Ok(cidr) = Ipv4Addr::from_str(&remote_addr.ip().to_string()) {
+    if let Ok(cidr) = Ipv4Addr::from_str(&remote_addr.ip().to_string()) {
         for allowed in state.allowed_cidrs {
             if allowed.contains(&cidr) {
                 return Ok(next.run(request).await);

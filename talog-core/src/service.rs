@@ -5,11 +5,13 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use chrono::Utc;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{warn};
 use regex::{Regex};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use crate::{FieldMapping, Index, IndexMapping, LogType, Tag, TalogIndex, INDEX_MAPPING_INDEX_NAME};
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LogModel {
     pub data: Value,
     pub log: String,
@@ -49,7 +51,7 @@ impl Service {
     }
 
     pub async fn get_mapping(&self, log_type: &LogType, name: &str) -> Option<IndexMapping> {
-        match self.get_mappings(log_type).await {
+        match self.get_mappings(&Some(log_type.clone())).await {
             Ok(mappings) => {
                 mappings.into_iter().find(|x| x.name == name)
             }
@@ -61,18 +63,30 @@ impl Service {
     }
 
     /// get index mappings by log type(Json/Raw)
-    pub async fn get_mappings(&self, log_type: &LogType) -> Result<Vec<IndexMapping>, Box<dyn Error>> {
+    pub async fn get_mappings(&self, log_type: &Option<LogType>) -> Result<Vec<IndexMapping>, Box<dyn Error>> {
         let guard = self.get_map_read_guard()?;
         match guard.get(INDEX_MAPPING_INDEX_NAME) {
             None => { Ok(Vec::new()) }
             Some(index) => {
-                let mappings: Vec<IndexMapping> = index.search_logs(&format!("log_type = '{log_type}'"),
-                        Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
-                    .iter().filter(|x| x.is_some())
-                    .map(|x| x.as_ref().unwrap())
-                    .cloned()
-                    .collect();
-                Ok(mappings)
+                match log_type {
+                    None => {
+                        let mappings: Vec<IndexMapping> = index.get_all_logs(Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
+                            .iter().filter(|x| x.is_some())
+                            .map(|x| x.as_ref().unwrap())
+                            .cloned()
+                            .collect();
+                        Ok(mappings)
+                    }
+                    Some(log_type) => {
+                        let mappings: Vec<IndexMapping> = index.search_logs(&format!("log_type = '{log_type}'"),
+                                                                            Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
+                            .iter().filter(|x| x.is_some())
+                            .map(|x| x.as_ref().unwrap())
+                            .cloned()
+                            .collect();
+                        Ok(mappings)
+                    }
+                }
             }
         }
     }
@@ -89,7 +103,7 @@ impl Service {
 
     /// determine whether the mapping has changed
     pub async fn has_mapping_changed(&self, mapping: &IndexMapping) -> Result<bool, Box<dyn Error>> {
-        let mappings = self.get_mappings(&LogType::Json).await?;
+        let mappings = self.get_mappings(&Some(LogType::Json)).await?;
         if let Some(m) = mappings.iter().find(|x| x.name == mapping.name) {
             if m.log_type != mapping.log_type {
                 return Err(format!("can not change log_type of {} from {} to {}", m.name, m.log_type, mapping.log_type).into());
@@ -140,7 +154,8 @@ impl Service {
             }
             Ok(())
         } else {
-            self.index_raw_logs(name, tags, logs)
+            let logs = logs.iter().map(|x| escape_newline(x)).collect::<Vec<_>>();
+            self.index_raw_logs(name, tags, &logs)
         }
     }
 
@@ -152,11 +167,13 @@ impl Service {
             }
 
             if mapping.log_regex.is_some() {
-                return self.index_log_with_regex(mapping, tags, log);
+                let log = escape_newline(log);
+                return self.index_log_with_regex(mapping, tags, &log);
             }
         }
 
-        self.index_raw_logs(&mapping.name, tags, &vec![log.to_string()])
+        let log = escape_newline(log);
+        self.index_raw_logs(&mapping.name, tags, &vec![log])
     }
 
     /// generate an index mapping relationship based on the reflection characteristics of the type
@@ -230,7 +247,6 @@ impl Service {
     pub async fn search_logs(&self, log_type: &LogType, name: &str, expr: &str) -> Result<Vec<LogModel>, Box<dyn Error>> {
         match self.get_mapping(log_type, name).await {
             Some(mapping) => {
-                let begin = Utc::now();
                 let guard = self.get_map_read_guard()?;
                 match guard.get(name) {
                     Some(index) => {
@@ -283,7 +299,6 @@ impl Service {
                                 }
                             }
                         };
-                        debug!("search {name} logs by {expr}, total logs: {}, elapsed: {}", result.len(), Utc::now() - begin);
                         Ok(result)
                     }
                     None => {
@@ -355,4 +370,16 @@ impl Service {
             .push(&tags, logs)?;
         Ok(())
     }
+}
+
+fn escape_newline(log: &str) -> String {
+    let mut result = String::with_capacity(log.len());
+    for c in log.chars() {
+        match c {
+            '\n' => result.push_str("␤"),
+            '\r' => {} // 跳过 \r，因为 \r\n 会被合并处理
+            _ => result.push(c),
+        }
+    }
+    result
 }

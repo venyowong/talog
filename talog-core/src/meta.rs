@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Display, Formatter};
+use std::str::FromStr;
 use ::serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 use talog_macros::TalogIndex;
@@ -40,6 +41,19 @@ pub trait TalogIndex : DeserializeOwned + Serialize {
     fn index_name() -> &'static str;
 }
 
+impl Display for FieldType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            FieldType::Number => {
+                write!(f, "Number")
+            }
+            FieldType::String => {
+                write!(f, "String")
+            }
+        }
+    }
+}
+
 impl Display for LogType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -53,15 +67,14 @@ impl Display for LogType {
     }
 }
 
-impl Display for FieldType {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            FieldType::Number => {
-                write!(f, "Number")
-            }
-            FieldType::String => {
-                write!(f, "String")
-            }
+impl FromStr for LogType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "json" => Ok(LogType::Json),
+            "raw" => Ok(LogType::Raw),
+            _ => Err(format!("failed to parse LogType from {s}").to_string()),
         }
     }
 }

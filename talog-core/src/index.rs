@@ -199,6 +199,10 @@ impl Index {
 
     /// search logs by expr, please refer to [fexpr](https://github.com/mnaufalhilmym/fexpr) for expr rules
     pub fn search_logs<'a, T>(&self, expr: &str, log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, Box<dyn Error>> {
+        if expr.is_empty() {
+            return self.get_all_logs(log_mapper);
+        }
+
         let groups = fexpr::parse(expr)?;
         let buckets = self.search(&ExprGroupItem::ExprGroups(groups));
         match buckets {
@@ -212,7 +216,8 @@ impl Index {
         for bucket in buckets {
             let reader = BufReader::new(File::open(&bucket.file)?);
             for line in reader.lines() {
-                result.push(log_mapper(&line?, &bucket.tags));
+                let line = line?.replace("␤", "\n");
+                result.push(log_mapper(&line, &bucket.tags));
             }
         }
         Ok(result)
