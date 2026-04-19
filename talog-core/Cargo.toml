@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = "0.4.44"
-fexpr = "0.1.2"
+fexpr = { git = "https://github.com/venyowong/fexpr", branch = "main" }
 hex = "0.4.3"
 itertools = "0.14.0"
 log = "0.4.29"

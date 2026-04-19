@@ -50,6 +50,7 @@ impl Index {
         for bucket in buckets {
             file::remove_file(&bucket.file)?;
         }
+        file::remove_file(self.path.join(INDEX_FILE).to_string_lossy().as_ref())?;
         guard.clear();
         Ok(())
     }
@@ -107,6 +108,7 @@ impl Index {
                 warn!("failed to append log into {}: {e}", &bucket.file);
             }
         }
+        file::flush(&bucket.file)?;
 
         Ok(())
     }

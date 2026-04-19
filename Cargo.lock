@@ -485,8 +485,7 @@ dependencies = [
 [[package]]
 name = "fexpr"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71f2e677de343999f089a6c5c074f1d3228627b2f417e1b59556e1e20bb7a1bb"
+source = "git+https://github.com/venyowong/fexpr?branch=main#aca5048fe328d93bc49cbc8b1a354d5844f34515"
 dependencies = [
  "once_cell",
  "regex",

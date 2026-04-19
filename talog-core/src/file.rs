@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::sync::mpsc::{Sender};
-use std::sync::{mpsc, Arc, LockResult, Mutex, Once, OnceLock};
+use std::sync::{mpsc, LockResult, Mutex, Once, OnceLock};
 use std::{fs, thread};
 use std::error::Error;
 use std::path::Path;
@@ -18,6 +18,7 @@ pub struct FileState {
 
 pub enum Message {
     Append(String, String),
+    Flush(String),
     Overwrite(String, String),
     Remove(String)
 }
@@ -62,6 +63,20 @@ fn init() {
                             }
                         }
                     }
+                    Message::Flush(path) => {
+                        match FILES.lock() {
+                            Ok(mut files) => {
+                                if let Some(file) = files.get_mut(&path) {
+                                    if file.writer.buffer().len() > 0 {
+                                        file.writer.flush().ok();
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("failed to lock FILES: {}", e);
+                            }
+                        }
+                    }
                     Message::Overwrite(path, content) => {
                         if let Err(e) = fs::write(&path, content) {
                             warn!("failed to overwrite file({}): {}", &path, e);
@@ -86,36 +101,26 @@ fn init() {
             }
         });
         HANDLE.set(Mutex::new(Some(handle))).unwrap();
-    });
 
-    // flush files and close temporarily unused files
-    thread::spawn(|| {
-        loop {
-            thread::sleep(Duration::from_secs(3));
+        // flush files and close temporarily unused files
+        thread::spawn(|| {
+            loop {
+                thread::sleep(Duration::from_secs(5));
 
-            let mut files = FILES.lock().ok();
-            if let Some(files) = files.as_mut() {
-                let len = files.len();
-                for file in files.values_mut() {
-                    if file.writer.buffer().len() > 0 {
-                        if !file.writer.flush().is_ok() {
-                            continue;
-                        }
-
-                        file.last_write = Instant::now();
+                let mut files = FILES.lock().ok();
+                if let Some(files) = files.as_mut() {
+                    let len = files.len();
+                    files.retain(|_, v| {
+                        let duration = Instant::now().duration_since(v.last_write);
+                        duration < Duration::from_secs(30)
+                    });
+                    let new_len = files.len();
+                    if new_len < len {
+                        info!("closed {} temporarily unused bucket files", len - new_len);
                     }
                 }
-
-                files.retain(|_, v| {
-                    let duration = Instant::now().duration_since(v.last_write);
-                    duration < Duration::from_secs(30)
-                });
-                let new_len = files.len();
-                if new_len < len {
-                    info!("closed {} temporarily unused bucket files", len - new_len);
-                }
             }
-        }
+        });
     });
 }
 
@@ -125,6 +130,42 @@ pub fn append_line(path: &str, line: &str) -> Result<(), Box<dyn Error>> {
         let guard = sender.lock()?;
         let sender = guard.as_ref().unwrap();
         sender.send(Message::Append(path.to_string(), line.to_string()))?;
+        Ok(())
+    } else {
+        Err("failed to get sender".into())
+    }
+}
+
+pub fn flush(path: &str) -> Result<(), Box<dyn Error>> {
+    init();
+    if let Some(sender) = SENDER.get() {
+        let guard = sender.lock()?;
+        let sender = guard.as_ref().unwrap();
+        sender.send(Message::Flush(path.to_string()))?;
+        Ok(())
+    } else {
+        Err("failed to get sender".into())
+    }
+}
+
+pub fn overwrite(path: &str, content: &str) -> Result<(), Box<dyn Error>> {
+    init();
+    if let Some(sender) = SENDER.get() {
+        let guard = sender.lock()?;
+        let sender = guard.as_ref().unwrap();
+        sender.send(Message::Overwrite(path.to_string(), content.to_string()))?;
+        Ok(())
+    } else {
+        Err("failed to get sender".into())
+    }
+}
+
+pub fn remove_file(path: &str) -> Result<(), Box<dyn Error>> {
+    init();
+    if let Some(sender) = SENDER.get() {
+        let guard = sender.lock()?;
+        let sender = guard.as_ref().unwrap();
+        sender.send(Message::Remove(path.to_string()))?;
         Ok(())
     } else {
         Err("failed to get sender".into())
@@ -154,28 +195,4 @@ pub fn wait_for_done() {
         }
     }
     info!("files flushed");
-}
-
-pub fn overwrite(path: &str, content: &str) -> Result<(), Box<dyn Error>> {
-    init();
-    if let Some(sender) = SENDER.get() {
-        let guard = sender.lock()?;
-        let sender = guard.as_ref().unwrap();
-        sender.send(Message::Overwrite(path.to_string(), content.to_string()))?;
-        Ok(())
-    } else {
-        Err("failed to get sender".into())
-    }
-}
-
-pub fn remove_file(path: &str) -> Result<(), Box<dyn Error>> {
-    init();
-    if let Some(sender) = SENDER.get() {
-        let guard = sender.lock()?;
-        let sender = guard.as_ref().unwrap();
-        sender.send(Message::Remove(path.to_string()))?;
-        Ok(())
-    } else {
-        Err("failed to get sender".into())
-    }
 }

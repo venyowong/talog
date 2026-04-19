@@ -20,21 +20,23 @@ pub struct AppConfig {
     pub port: u16,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct IndexLogRequest {
     pub name: String,
     pub log: String,
     pub log_type: LogType,
     pub parse_log: bool,
+    #[serde(default)]
     pub tags: Vec<Tag>
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct IndexLogsRequest {
     pub name: String,
     pub log_type: LogType,
     pub logs: Vec<String>,
     pub parse_log: bool,
+    #[serde(default)]
     pub tags: Vec<Tag>
 }
 
