@@ -102,58 +102,6 @@ pub mut:
 }
 ```
 
-### Additional Notes
-
-Although Talog supports three tag value types (string/number/time), all are treated as strings at the underlying level. Therefore, all data can use shards to build indexes.
-Talog uses a simple indexing method to achieve fast query performance.
-
-For example:`date: 20251114` is associated with List1 {bucket1, bucket2, bucket3}, `level: INF` is associated with List2 {bucket2, bucket4, bucket5}. This means bucket1, bucket2, and bucket3 contain logs from 2025-11-14, while bucket2, bucket4, and bucket5 contain INFO logs. To query INFO logs from 2025-11-14 using the condition `date == 20251114 && level == INF`, talog first retrieves List1 and List2, then computes their intersection (resulting in bucket2). Thus, bucket2 contains the INFO logs from 2025-11-14.
-
-**A large number of tag enumerations will result in a deep trie structure, increasing index data size and impacting index setup efficiency.**
-
-## Advantages
-
-- Small footprint: Developed in V language, the compiled executable is only 5MB
-- Zero runtime dependencies
-- Log indexing performance sufficient for small-scale projects
-
-  - /index/logs
-
-    This endpoint accepts multiple logs with identical tags. For example, to store fund NAV data in an index named `fund_nav` using the fund code as a unique tag `fund_code:xxxxxx`, this endpoint can be used to improve indexing efficiency.
-    Based on the following test results, indexing a single log takes an average of 0.0134ms (this result is for reference only, as multiple logs trigger only one indexing process when using this endpoint):
-    
-    ```
-    2025-12-27T00:36:26.021000Z [INFO ] index fund_nav logs, total logs: 2319, elapsed: 28
-    2025-12-27T00:36:26.480000Z [INFO ] index fund_nav logs, total logs: 3225, elapsed: 55
-    2025-12-27T00:36:26.830000Z [INFO ] index fund_nav logs, total logs: 2767, elapsed: 23
-    2025-12-27T00:36:27.270000Z [INFO ] index fund_nav logs, total logs: 1768, elapsed: 24
-    2025-12-27T00:36:27.603000Z [INFO ] index fund_nav logs, total logs: 3610, elapsed: 47
-    2025-12-27T00:36:28.042000Z [INFO ] index fund_nav logs, total logs: 2539, elapsed: 29
-    2025-12-27T00:36:28.419000Z [INFO ] index fund_nav logs, total logs: 2763, elapsed: 40
-    2025-12-27T00:36:28.712000Z [INFO ] index fund_nav logs, total logs: 1577, elapsed: 30
-    ```
-
-  - /index/logs2
-  
-    This endpoint accepts multiple logs but indexes each one individually. From the following logs, indexing a single log takes an average of 0.06ms:
-
-    ```
-    2025-11-26T03:10:31.946000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 1056
-    2025-11-26T03:10:33.984000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 333
-    2025-11-26T03:10:37.454000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 442
-    2025-11-26T03:11:32.538000Z [DEBUG] index multi logs, total logs: 1894, elapsed: 92
-    ```
-- High log query efficiency
-  
-  ```
-  2025-11-26T03:18:48.954000Z [DEBUG] search eap2 buckets by level == ERR, total buckets: 6, elapsed: 0
-  2025-11-26T03:18:49.101000Z [DEBUG] search eap2 logs by level == ERR, total logs: 3067, elapsed: 147
-  ```
-
-  The logs above show that talog locates corresponding bucket files extremely quickly (completing in less than 1ms). The remaining time is spent parsing logs. For this reason, it is recommended that each bucket does not store an excessive number of logs to ensure optimal query efficiency.
-
-- Built with Vlang's official web framework (veb) for fast API response times
-
 ## api
 
 Before indexing logs, you must first call the `/index/mapping` endpoint to configure index metadata.
@@ -166,32 +114,36 @@ content-type: application/json
 
 {
     "name": "eqp_simulator",
-    "log_type": "raw",
-    "log_header": "eqp",
-    "log_regex": "\\[(?P<time>[^\\.]*)\\.\\d{3} \\+08:00\\] \\[(?P<level>[^\\]]*)\\] \\[(?P<name>[^\\]]*)\\] (?P<msg>.*)$",
+    "log_type": "Raw",
+    "log_regex": "\\[(?<date>[^ ]*) (?<time>[^ ]*) \\+08:00\\] \\[(?<level>[^\\]]*)\\] \\[(?<name>[^\\]]*)\\] (?<msg>.*)$",
     "fields": [
         {
-            "name": "time",
-            "tag_name": "time",
-            "type": "time",
-            "index_format": "YYYYMM",
-            "parse_format": "YYYY-MM-DD HH:mm:ss"
+            "name": "date",
+            "is_tag": true,
+            "typ": "String"
+        },
+        {
+          "name": "time",
+          "is_tag": false,
+          "typ": "String"
         },
         {
             "name": "level",
-            "tag_name": "level",
-            "type": "string"
+            "is_tag": true,
+            "typ": "String"
         },
         {
             "name": "name",
-            "tag_name": "name",
-            "type": "string"
+          "is_tag": true,
+          "typ": "String"
         },
         {
             "name": "msg",
-            "type": "string"
+          "is_tag": false,
+          "typ": "String"
         }
-    ]
+    ],
+    "mapping_time": 0
 }
 ```
 
@@ -203,32 +155,31 @@ log_regex: Regular expression for parsing logs and extracting fields
 
 fields: Parsed log fields (two sources: extracted from logs themselves—either via log_regex for plain text logs or deserialization for JSON data—or log tags). Configuring only tag fields (or no fields at all) does not affect indexing, but talog's built-in admin interface uses these configurations to display fields. For this reason, it is recommended to configure all fields; incomplete configuration may result in some fields not being displayed.
 
-fields.tag_name：When specified, talog generates corresponding tags based on field values
+fields.name: field name
 
-fields.type：Field type (talog supports string, number, and time)
+fields.is_tag: whether the field is used as an indexing tag
 
-fields.parse_format：For time fields, talog parses the string using this format (defaults to `YYYY-MM-DD HH:mm:ss` if not configured)
+fields.typ: field type — talog supports String and Number
 
-fields.index_format：For time fields with a specified tag_name, this format is used to generate tag values (defaults to `YYYY-MM-DD HH:mm:ss` if not configured)
-
-### /index
+### /index/log
 
 Index a single log entry
 
 ```
-POST http://127.0.0.1:26382/index
+POST http://127.0.0.1:26382/index/log
 content-type: application/json
 
 {
     "name": "eqp_simulator",
-    "lot_type": "raw",
+    "log_type": "Raw",
     "log": "[2025-09-12 09:24:32.606 +08:00] [INF] [Nucleus] SECS/GEM EAP: --> [0x000007C9] 'S1F14'\n    <L [2] \n        <B [0] >\n        <L [2] \n            <A [6] '8800FC'>\n            <A [5] '1.0.0'>\n        >\n    >\n.\n",
     "tags": [
         {
             "label": "secs",
             "value": "S1F14"
         }
-    ]
+    ],
+    "parse_log": true
 }
 ```
 
@@ -256,4 +207,4 @@ Physically deletes an entire index (specify the index name via the name query pa
 http://localhost:26382/search/logs?name=&log_type=raw&query=
 ```
 
-query：Only supports queries on tag fields. The query syntax format is `(key1 > value1 || key2 == 'value2') && key3 != "value3"`，Supported operators include: `>` `>=` `<` `<=` `==` `!=` `||` `&&` `in` `like`
+query：Only supports queries on tag fields. Query syntax follows [fexpr](https://github.com/venyowong/fexpr)

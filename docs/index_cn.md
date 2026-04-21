@@ -103,58 +103,6 @@ pub mut:
 }
 ```
 
-### 其他说明
-
-虽然 talog 支持的标签值有 string/number/time 三种类型，但是底层均是作为字符串，因此所有的数据都可以使用 shard 去构建索引
-
-talog 使用了简单的索引方式，因此才能得到较快的查询性能
-
-例如：`date: 20251114` 关联了 `List1 {bucket1, bucket2, bucket3}`，`level: INF` 关联了 `List2 {bucket2, bucket4, bucket5}`，即 bucket1、bucket2、bucket3 是 2025-11-14 的日志，而 bucket2、bucket4、bucket5 为 INFO 日志。当想要查询 2025-11-14 的 INFO 日志时，可使用 `date == 20251114 && level == INF`, talog 会先查询到 List1、List2，然后将二者取交集，得到 bucket2，因此可知，bucket2 中存储的是 2025-11-14 的 INFO 日志，无需知道 bucket 中存储的具体内容
-
-## 优势
-
-- 体积小，使用 vlang 语言开发，编译出来的可执行文件只有 5M
-- 不依赖任何运行环境
-- 日志索引性能能够满足小型项目需求
-
-  - /index/logs
-
-    该接口接收具有相同标签的多条日志，例如要将基金净值数据存储在名为 `fund_nav` 的 index 中，使用基金代码作为唯一标签 `fund_code:xxxxxx`，则可以使用该接口以提高索引效率
-
-    根据以下测试结果计算，平均索引一条日志需要 0.0134ms，但该结果其实不具准确性，仅作为参考，因为调用该接口时，多条日志也只会有一次索引过程
-
-    ```
-    2025-12-27T00:36:26.021000Z [INFO ] index fund_nav logs, total logs: 2319, elapsed: 28
-    2025-12-27T00:36:26.480000Z [INFO ] index fund_nav logs, total logs: 3225, elapsed: 55
-    2025-12-27T00:36:26.830000Z [INFO ] index fund_nav logs, total logs: 2767, elapsed: 23
-    2025-12-27T00:36:27.270000Z [INFO ] index fund_nav logs, total logs: 1768, elapsed: 24
-    2025-12-27T00:36:27.603000Z [INFO ] index fund_nav logs, total logs: 3610, elapsed: 47
-    2025-12-27T00:36:28.042000Z [INFO ] index fund_nav logs, total logs: 2539, elapsed: 29
-    2025-12-27T00:36:28.419000Z [INFO ] index fund_nav logs, total logs: 2763, elapsed: 40
-    2025-12-27T00:36:28.712000Z [INFO ] index fund_nav logs, total logs: 1577, elapsed: 30
-    ```
-
-  - /index/logs2
-  
-    该接口接收多条日志，但是会对每一条日志单独索引，从以下日志可计算出，平均索引一条日志需要 0.06ms
-
-    ```
-    2025-11-26T03:10:31.946000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 1056
-    2025-11-26T03:10:33.984000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 333
-    2025-11-26T03:10:37.454000Z [DEBUG] index multi logs, total logs: 10000, elapsed: 442
-    2025-11-26T03:11:32.538000Z [DEBUG] index multi logs, total logs: 1894, elapsed: 92
-    ```
-- 日志查询效率高
-  
-  ```
-  2025-11-26T03:18:48.954000Z [DEBUG] search eap2 buckets by level == ERR, total buckets: 6, elapsed: 0
-  2025-11-26T03:18:49.101000Z [DEBUG] search eap2 logs by level == ERR, total logs: 3067, elapsed: 147
-  ```
-
-  通过以上日志可看出，talog 查找对应的 bucket 文件是非常快的，不到 1ms 就完成了，剩下的时间都用在解析日志上了，因此建议一个 bucket 不要存储太多日志，这样才能够保证查询的效率
-
-- 使用 vlang 官方 web 框架 veb 开发 api，响应速度快
-
 ## api
 
 在索引日志之前，需要先调用 `/index/mapping` 接口，配置索引元数据
@@ -167,69 +115,70 @@ content-type: application/json
 
 {
     "name": "eqp_simulator",
-    "log_type": "raw",
-    "log_header": "eqp",
-    "log_regex": "\\[(?P<time>[^\\.]*)\\.\\d{3} \\+08:00\\] \\[(?P<level>[^\\]]*)\\] \\[(?P<name>[^\\]]*)\\] (?P<msg>.*)$",
+    "log_type": "Raw",
+    "log_regex": "\\[(?<date>[^ ]*) (?<time>[^ ]*) \\+08:00\\] \\[(?<level>[^\\]]*)\\] \\[(?<name>[^\\]]*)\\] (?<msg>.*)$",
     "fields": [
         {
-            "name": "time",
-            "tag_name": "time",
-            "type": "time",
-            "index_format": "YYYYMM",
-            "parse_format": "YYYY-MM-DD HH:mm:ss"
+            "name": "date",
+            "is_tag": true,
+            "typ": "String"
+        },
+        {
+          "name": "time",
+          "is_tag": false,
+          "typ": "String"
         },
         {
             "name": "level",
-            "tag_name": "level",
-            "type": "string"
+            "is_tag": true,
+            "typ": "String"
         },
         {
             "name": "name",
-            "tag_name": "name",
-            "type": "string"
+          "is_tag": true,
+          "typ": "String"
         },
         {
             "name": "msg",
-            "type": "string"
+          "is_tag": false,
+          "typ": "String"
         }
-    ]
+    ],
+    "mapping_time": 0
 }
 ```
 
 log_type：日志类型，raw-普通文本日志 json-结构化数据
 
-log_header：索引后的日志前缀，当一条日志有多行时，需要配置该字段
-
 log_regex：日志的正则表达式，用于解析日志，从日志中提取字段
 
 fields：日志解析后的字段，有两种来源，一个是从日志本身解析出来的字段，比如普通文本日志通过 log_regex 解析出来，或者 json 数据反序列化而得，另一个是日志标签。只配置标签字段甚至不配置任何字段，都不影响索引，但是 talog 自带的后台页面是根据这边的配置去展示字段的，因此建议配置齐全，如果配置不全，会导致部分字段无法展示
 
-fields.tag_name：指定了 tag_name，talog 会根据字段值生成对应的标签
+fields.name：字段名
 
-fields.type：字段类型，talog 支持 string、number、time 三种类型
+fields.is_tag: 表名字段是否作为标签，用于索引
 
-fields.parse_format：如果是 time 字段，talog 会使用 parse_format 去解析字符串，如果未配置则默认会使用 `YYYY-MM-DD HH:mm:ss` 格式进行解析
+fields.typ：字段类型，talog 支持 string、number 三种类型
 
-fields.index_format：如果是 time 字段，并且指定了 tag_name，则会使用 index_format 去生成标签值，如果未配置默认会使用 `YYYY-MM-DD HH:mm:ss` 格式
-
-### /index
+### /index/log
 
 索引单条日志
 
 ```
-POST http://127.0.0.1:26382/index
+POST http://127.0.0.1:26382/index/log
 content-type: application/json
 
 {
     "name": "eqp_simulator",
-    "lot_type": "raw",
+    "log_type": "Raw",
     "log": "[2025-09-12 09:24:32.606 +08:00] [INF] [Nucleus] SECS/GEM EAP: --> [0x000007C9] 'S1F14'\n    <L [2] \n        <B [0] >\n        <L [2] \n            <A [6] '8800FC'>\n            <A [5] '1.0.0'>\n        >\n    >\n.\n",
     "tags": [
         {
             "label": "secs",
             "value": "S1F14"
         }
-    ]
+    ],
+    "parse_log": true
 }
 ```
 
@@ -257,4 +206,4 @@ POST http://127.0.0.1:26382/index/remove?name=
 http://localhost:26382/search/logs?name=&log_type=raw&query=
 ```
 
-query：只支持对于标签字段的查询，查询语句格式为 `(key1 > value1 || key2 == 'value2') && key3 != "value3"`，运算符支持 `>` `>=` `<` `<=` `==` `!=` `||` `&&` `in` `like`
+query：只支持对于标签字段的查询，查询语句格式参考 [fexpr](https://github.com/venyowong/fexpr)
