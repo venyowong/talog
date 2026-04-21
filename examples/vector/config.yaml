@@ -49,6 +49,6 @@ sinks:
       - "parsed"
       - FSCR61_parsed
     type: "http"
-    uri: "http://10.8.29.146:26382/index/logs2"
+    uri: "http://10.8.29.146:26382/index/log/seq"
     encoding:
       codec: "json"

@@ -2,24 +2,25 @@ POST http://127.0.0.1:26382/admin/login
 content-type: application/json
 
 {
-    "pwd": "e10adc3949ba59abbe56e057f20f883e"
+    "password": "e10adc3949ba59abbe56e057f20f883e"
 }
 
 ###
 
-POST http://127.0.0.1:26382/index
+POST http://127.0.0.1:26382/index/log
 content-type: application/json
 
 {
     "name": "eqp_simulator",
-    "lot_type": "raw",
+    "log_type": "Raw",
     "log": "[2025-09-12 09:24:32.606 +08:00] [INF] [Nucleus] SECS/GEM EAP: --> [0x000007C9] 'S1F14'\n    <L [2] \n        <B [0] >\n        <L [2] \n            <A [6] '8800FC'>\n            <A [5] '1.0.0'>\n        >\n    >\n.\n",
     "tags": [
         {
             "label": "secs",
             "value": "S1F14"
         }
-    ]
+    ],
+    "parse_log": true
 }
 
 ###
@@ -29,32 +30,36 @@ content-type: application/json
 
 {
     "name": "eqp_simulator",
-    "log_type": "raw",
-    "log_header": "eqp",
-    "log_regex": "\\[(?P<time>[^\\.]*)\\.\\d{3} \\+08:00\\] \\[(?P<level>[^\\]]*)\\] \\[(?P<name>[^\\]]*)\\] (?P<msg>.*)$",
+    "log_type": "Raw",
+    "log_regex": "\\[(?<date>[^ ]*) (?<time>[^ ]*) \\+08:00\\] \\[(?<level>[^\\]]*)\\] \\[(?<name>[^\\]]*)\\] (?<msg>.*)$",
     "fields": [
         {
-            "name": "time",
-            "tag_name": "time",
-            "type": "time",
-            "index_format": "YYYYMMDD",
-            "parse_format": "YYYY-MM-DD HH:mm:ss"
+            "name": "date",
+            "is_tag": true,
+            "typ": "String"
+        },
+        {
+          "name": "time",
+          "is_tag": false,
+          "typ": "String"
         },
         {
             "name": "level",
-            "tag_name": "level",
-            "type": "string"
+            "is_tag": true,
+            "typ": "String"
         },
         {
             "name": "name",
-            "tag_name": "name",
-            "type": "string"
+          "is_tag": true,
+          "typ": "String"
         },
         {
             "name": "msg",
-            "type": "string"
+          "is_tag": false,
+          "typ": "String"
         }
-    ]
+    ],
+    "mapping_time": 0
 }
 
 ###
@@ -64,7 +69,7 @@ content-type: application/json
 
 {
     "name": "eap",
-    "log_type": "raw",
+    "log_type": "Raw",
     "log_header": "eap",
     "log_regex": "\\[(?P<time>[^\\.]*)\\.\\d{3} \\+08:00\\] \\[(?P<level>[^\\]]*)\\] (?P<msg>.*)$",
     "fields": [
@@ -102,4 +107,4 @@ POST http://127.0.0.1:26382/index/remove?name=eap
 
 ###
 
-http://localhost:26382/search/logs?name=old_eap&log_type=raw&query=
+http://localhost:26382/search/logs?name=eqp_simulator&log_type=Raw&expr=secs%3D'S1F14'

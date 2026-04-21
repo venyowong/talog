@@ -25,7 +25,7 @@ function getIndexBody() {
 }
 
 function getTabBody(m) {
-  if (m.log_type == "json") {
+  if (m.log_type == "Json") {
     return getParsedTab(m);
   } else if (m.log_regex) {
     return getParsedTab(m);
@@ -40,7 +40,7 @@ function getRawTab(m) {
     body: [
       {
         type: "service",
-        api: "./search/logs?name=" + m.name + "&log_type=" + m.log_type + "&query=${query}",
+        api: "./search/logs?name=" + m.name + "&log_type=" + m.log_type + "&expr=${query}",
         syncLocation: false,
         initFetch: false,
         body: [
@@ -98,7 +98,7 @@ function getParsedTab(m) {
     type: "crud",
     api: {
       method: "get",
-      url: "./search/logs?name=" + m.name + "&log_type=" + m.log_type + "&query=${query}",
+      url: "./search/logs?name=" + m.name + "&log_type=" + m.log_type + "&expr=${query}",
       adaptor: function (payload, response) {
         if (payload.data) {
           payload.data = {
@@ -154,7 +154,7 @@ function logAdaptor(l, m) {
     if (f.tag_name != "" && !(f.name in l.data)) {
       l.data[f.name] = l.tags.filter(x => x.label == f.tag_name)[0].value;
     }
-    if (f.type == "string" && typeof l.data[f.name] == "object") {
+    if (f.typ == "String" && typeof l.data[f.name] == "object") {
       l.data[f.name] = JSON.stringify(l.data[f.name]);
     }
   });
