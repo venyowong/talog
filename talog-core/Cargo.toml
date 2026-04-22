@@ -2,10 +2,12 @@
 name = "talog-core"
 version = "0.1.0"
 edition = "2024"
+description = "A tiny and simple log solution, talog tag logs to store data in a simple way, so it can be quickly queried"
+license = "MIT"
 
 [dependencies]
 chrono = "0.4.44"
-fexpr = { git = "https://github.com/venyowong/fexpr", branch = "main" }
+fexpr = { version = "0.1.0", package = "fexpr-utf8" }
 hex = "0.4.3"
 itertools = "0.14.0"
 log = "0.4.29"

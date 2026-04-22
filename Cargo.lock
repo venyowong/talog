@@ -483,9 +483,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "fexpr"
-version = "0.1.2"
-source = "git+https://github.com/venyowong/fexpr?branch=main#aca5048fe328d93bc49cbc8b1a354d5844f34515"
+name = "fexpr-utf8"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a2d6f9ef0f23f1d6dafda3470d7f0f59febb9bfcef30953d510764ff2c27825"
 dependencies = [
  "once_cell",
  "regex",
@@ -1535,7 +1536,7 @@ name = "talog-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "fexpr",
+ "fexpr-utf8",
  "hex",
  "itertools",
  "log",
