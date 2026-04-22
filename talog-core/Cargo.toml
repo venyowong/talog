@@ -11,7 +11,7 @@ fexpr = { version = "0.1.0", package = "fexpr-utf8" }
 hex = "0.4.3"
 itertools = "0.14.0"
 log = "0.4.29"
-talog-macros = { path = "../talog-macros" }
+talog-macros = "0.1.0"
 md-5 = "0.11.0"
 once_cell = "1.21.4"
 serde = { version = "1.0.228", features = ["derive"] }

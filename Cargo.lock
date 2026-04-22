@@ -1545,12 +1545,23 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "talog-macros",
+ "talog-macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "talog-macros"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "talog-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab085d1b3a39edbc62c44d19d0e42b72edddc1033620203498ff68abea58bab7"
 dependencies = [
  "proc-macro2",
  "quote",
