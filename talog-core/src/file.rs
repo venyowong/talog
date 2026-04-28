@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::sync::mpsc::{Sender};
-use std::sync::{mpsc, LockResult, Mutex, Once, OnceLock};
+use std::sync::{mpsc, Mutex, Once, OnceLock};
 use std::{fs, thread};
-use std::error::Error;
 use std::path::Path;
 use std::thread::JoinHandle;
 use std::time::{Instant, Duration};
+use anyhow::anyhow;
 use once_cell::sync::Lazy;
 use log::{info, warn};
 
@@ -124,51 +124,51 @@ fn init() {
     });
 }
 
-pub fn append_line(path: &str, line: &str) -> Result<(), Box<dyn Error>> {
+pub fn append_line(path: &str, line: &str) -> Result<(), anyhow::Error> {
     init();
     if let Some(sender) = SENDER.get() {
-        let guard = sender.lock()?;
+        let guard = sender.lock().map_err(|_| anyhow!("mutex poisoned"))?;
         let sender = guard.as_ref().unwrap();
         sender.send(Message::Append(path.to_string(), line.to_string()))?;
         Ok(())
     } else {
-        Err("failed to get sender".into())
+        Err(anyhow!("failed to get sender"))
     }
 }
 
-pub fn flush(path: &str) -> Result<(), Box<dyn Error>> {
+pub fn flush(path: &str) -> Result<(), anyhow::Error> {
     init();
     if let Some(sender) = SENDER.get() {
-        let guard = sender.lock()?;
+        let guard = sender.lock().map_err(|_| anyhow!("mutex poisoned"))?;
         let sender = guard.as_ref().unwrap();
         sender.send(Message::Flush(path.to_string()))?;
         Ok(())
     } else {
-        Err("failed to get sender".into())
+        Err(anyhow!("failed to get sender"))
     }
 }
 
-pub fn overwrite(path: &str, content: &str) -> Result<(), Box<dyn Error>> {
+pub fn overwrite(path: &str, content: &str) -> Result<(), anyhow::Error> {
     init();
     if let Some(sender) = SENDER.get() {
-        let guard = sender.lock()?;
+        let guard = sender.lock().map_err(|_| anyhow!("mutex poisoned"))?;
         let sender = guard.as_ref().unwrap();
         sender.send(Message::Overwrite(path.to_string(), content.to_string()))?;
         Ok(())
     } else {
-        Err("failed to get sender".into())
+        Err(anyhow!("failed to get sender"))
     }
 }
 
-pub fn remove_file(path: &str) -> Result<(), Box<dyn Error>> {
+pub fn remove_file(path: &str) -> Result<(), anyhow::Error> {
     init();
     if let Some(sender) = SENDER.get() {
-        let guard = sender.lock()?;
+        let guard = sender.lock().map_err(|_| anyhow!("mutex poisoned"))?;
         let sender = guard.as_ref().unwrap();
         sender.send(Message::Remove(path.to_string()))?;
         Ok(())
     } else {
-        Err("failed to get sender".into())
+        Err(anyhow!("failed to get sender"))
     }
 }
 

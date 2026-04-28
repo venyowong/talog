@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::error::Error;
 use std::{fs};
 use std::fs::{File};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::{RwLock};
+use anyhow::anyhow;
 use fexpr::{ExprGroupItem, JoinOp};
 use itertools::Itertools;
 use log::warn;
@@ -39,7 +39,7 @@ impl Index {
         idx
     }
 
-    pub fn clean(&self) -> Result<(), Box<dyn Error>> {
+    pub fn clean(&self) -> Result<(), anyhow::Error> {
         let mut guard = self.shards.write()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         let buckets: Vec<Bucket> = guard.values()
@@ -56,13 +56,13 @@ impl Index {
     }
 
     /// get all logs from all buckets
-    pub fn get_all_logs<'a, T>(&self, log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, Box<dyn Error>> {
+    pub fn get_all_logs<T>(&self, log_mapper: LogMapper<T>) -> Result<Vec<T>, anyhow::Error> {
         let guard = self.shards.read()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         let mut buckets: Vec<Bucket> = Vec::new();
         for shard in guard.values() {
             let bs = shard.get_buckets("")
-                .ok_or("failed to get all buckets")?;
+                .ok_or(anyhow!("failed to get all buckets"))?;
             for b in bs {
                 if !buckets.contains(&b) {
                     buckets.push(b);
@@ -87,7 +87,7 @@ impl Index {
     }
 
     /// index logs with same tags
-    pub fn push(&mut self, tags: &Vec<Tag>, logs: &Vec<String>) -> Result<(), Box<dyn Error>> {
+    pub fn push(&mut self, tags: &Vec<Tag>, logs: &Vec<String>) -> Result<(), anyhow::Error> {
         let bucket = Bucket::new(self.path.to_str().unwrap(), &tags);
 
         if !fs::exists(&bucket.file)? {
@@ -114,10 +114,10 @@ impl Index {
     }
 
     /// remove buckets by expr, please refer to [fexpr](https://github.com/mnaufalhilmym/fexpr) for expr rules
-    pub fn remove(&self, expr: &str) -> Result<(), Box<dyn Error>> {
+    pub fn remove(&self, expr: &str) -> Result<(), anyhow::Error> {
         let groups = fexpr::parse(expr)?;
         let buckets = self.search(&ExprGroupItem::ExprGroups(groups))
-            .ok_or(format!("failed to search buckets by expr: {}", expr))?;
+            .ok_or(anyhow!("failed to search buckets by expr: {}", expr))?;
         for bucket in buckets {
             if let Err(e) = self.remove_bucket(&bucket) {
                 warn!("failed to remove bucket {}: {e}", &bucket.file);
@@ -127,7 +127,7 @@ impl Index {
     }
 
     /// remove the specified bucket will drop the data in memory and delete the corresponding file
-    pub fn remove_bucket(&self, bucket: &Bucket) -> Result<(), Box<dyn Error>> {
+    pub fn remove_bucket(&self, bucket: &Bucket) -> Result<(), anyhow::Error> {
         for tag in &bucket.tags {
             if let Some(shard) = self.shards.write()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
@@ -200,7 +200,7 @@ impl Index {
     }
 
     /// search logs by expr, please refer to [fexpr](https://github.com/mnaufalhilmym/fexpr) for expr rules
-    pub fn search_logs<'a, T>(&self, expr: &str, log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, Box<dyn Error>> {
+    pub fn search_logs<'a, T>(&self, expr: &str, log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, anyhow::Error> {
         if expr.is_empty() {
             return self.get_all_logs(log_mapper);
         }
@@ -213,7 +213,7 @@ impl Index {
         }
     }
 
-    fn get_logs<'a, T>(buckets: &[Bucket], log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, Box<dyn Error>> {
+    fn get_logs<'a, T>(buckets: &[Bucket], log_mapper: LogMapper<'a, T>) -> Result<Vec<T>, anyhow::Error> {
         let mut result: Vec<T> = Vec::new();
         for bucket in buckets {
             let reader = BufReader::new(File::open(&bucket.file)?);
@@ -231,7 +231,7 @@ impl Index {
         self.shards = RwLock::new(shards);
     }
 
-    fn store_index_file(&self) -> Result<(), Box<dyn Error>> {
+    fn store_index_file(&self) -> Result<(), anyhow::Error> {
         let shards = self.shards.read()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
             .clone();

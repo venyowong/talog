@@ -1,20 +1,19 @@
 use std::collections::HashMap;
+use anyhow::anyhow;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
 use axum::{middleware, Json, Router};
 use axum::routing::{get, post};
 use chrono::Utc;
 use tracing::warn;
 use talog_core::IndexMapping;
-use crate::{layers, models};
-use crate::models::{ApiResult, IndexLogRequest, IndexLogsRequest};
+use crate::{layers};
+use crate::models::{ApiResult, AppError, IndexLogRequest, IndexLogsRequest};
 use crate::server::AppState;
 
-pub async fn get_mappings(State(state): State<AppState>) -> Result<Json<ApiResult<Vec<IndexMapping>>>, StatusCode> {
-    let mappings = state.service.get_mappings(&None).await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+pub async fn get_mappings(State(state): State<AppState>) -> Result<Json<ApiResult<Vec<IndexMapping>>>, AppError> {
+    let mappings = state.service.get_mappings(&None).await?;
     let indices = state.service.get_indices()
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        .ok_or(anyhow!("no index mappings found"))?;
     let mappings: Vec<IndexMapping> = mappings.into_iter()
         .filter(|x| indices.contains(&x.name))
         .collect();
@@ -22,28 +21,28 @@ pub async fn get_mappings(State(state): State<AppState>) -> Result<Json<ApiResul
 }
 
 pub async fn get_tag_values(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>)
-    -> Result<Json<ApiResult<Vec<String>>>, StatusCode>{
+    -> Result<Json<ApiResult<Vec<String>>>, AppError>{
     let name = params.get("name")
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        .ok_or(anyhow!("no name parameter"))?;
     let label = params.get("label")
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        .ok_or(anyhow!("no label parameter"))?;
     let values = state.service.get_tag_values(name, label).await
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        .ok_or(anyhow!("no tag values of {label} found"))?;
     Ok(Json(ApiResult { code: 0, msg: None, data: Some(values) }))
 }
 
 pub async fn index_log(State(state): State<AppState>, Json(request): Json<IndexLogRequest>)
-    -> Result<Json<ApiResult<()>>, StatusCode> {
-    let result = state.service.index_log(&request.log_type, &request.name,
-                                         &request.tags, request.parse_log, &request.log).await;
-    models::convert_result(result)
+    -> Result<Json<ApiResult<()>>, AppError> {
+    state.service.index_log(&request.log_type, &request.name,
+                            &request.tags, request.parse_log, &request.log).await?;
+    Ok(Json(ApiResult { code: 0, msg: None, data: Some(()) }))
 }
 
 /// index log one by one, and all logs must store in the same index
 pub async fn index_log_seq(State(state): State<AppState>, Json(requests): Json<Vec<IndexLogRequest>>)
-    -> Result<Json<ApiResult<()>>, StatusCode> {
+    -> Result<Json<ApiResult<()>>, AppError> {
     if requests.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(anyhow!("request is empty").into());
     }
 
     let log_type = &requests[0].log_type;
@@ -79,29 +78,28 @@ pub async fn index_log_seq(State(state): State<AppState>, Json(requests): Json<V
     }
 }
 
-pub async fn index_logs(State(state): State<AppState>, Json(request): Json<IndexLogsRequest>) -> Result<Json<ApiResult<()>>, StatusCode> {
-    let result = state.service.index_logs(&request.log_type, &request.name,
-                                         &request.tags, request.parse_log, &request.logs).await;
-    models::convert_result(result)
+pub async fn index_logs(State(state): State<AppState>, Json(request): Json<IndexLogsRequest>) -> Result<Json<ApiResult<()>>, AppError> {
+    state.service.index_logs(&request.log_type, &request.name,
+                                         &request.tags, request.parse_log, &request.logs).await?;
+    Ok(Json(ApiResult { code: 0, msg: None, data: Some(()) }))
 }
 
-pub async fn mapping(State(state): State<AppState>, Json(mut mapping): Json<IndexMapping>) -> Result<Json<ApiResult<()>>, StatusCode> {
-    let result = state.service.has_mapping_changed(&mapping).await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+pub async fn mapping(State(state): State<AppState>, Json(mut mapping): Json<IndexMapping>) -> Result<Json<ApiResult<()>>, AppError> {
+    let result = state.service.has_mapping_changed(&mapping).await?;
     if !result {
         return Ok(Json(ApiResult { code: 0, msg: Some("mapping has no change".to_string()), data: None }));
     }
 
     mapping.mapping_time = Utc::now().timestamp();
-    let result = state.service.index(&mapping);
-    models::convert_result(result)
+    state.service.index(&mapping)?;
+    Ok(Json(ApiResult { code: 0, msg: None, data: Some(()) }))
 }
 
-pub async fn remove(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>) -> Result<Json<ApiResult<()>>, StatusCode> {
+pub async fn remove(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>) -> Result<Json<ApiResult<()>>, AppError> {
     let name = params.get("name")
-        .ok_or(StatusCode::BAD_REQUEST)?;
-    let result = state.service.remove_index(name);
-    models::convert_result(result)
+        .ok_or(anyhow!("no name parameter"))?;
+    state.service.remove_index(name)?;
+    Ok(Json(ApiResult { code: 0, msg: None, data: Some(()) }))
 }
 
 pub fn route(state: AppState) -> Router<AppState> {

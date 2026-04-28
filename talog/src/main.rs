@@ -8,7 +8,7 @@ pub mod search;
 
 use std::net::SocketAddr;
 use std::path::Path;
-use axum::{middleware, routing, Router, ServiceExt};
+use axum::{routing, Router};
 use log::info;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;

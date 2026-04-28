@@ -1,6 +1,6 @@
-use std::error::Error;
 use axum::http::StatusCode;
 use axum::Json;
+use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use talog_core::{LogType, Tag};
 
@@ -19,6 +19,9 @@ pub struct AppConfig {
     pub origins: Vec<String>,
     pub port: u16,
 }
+
+#[derive(Debug)]
+pub struct AppError(anyhow::Error);
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct IndexLogRequest {
@@ -46,9 +49,21 @@ pub struct JwtClaims {
     pub sub: String,
 }
 
-pub fn convert_result(result: Result<(), Box<dyn Error>>) -> Result<Json<ApiResult<()>>, StatusCode> {
-    match result {
-        Ok(_) => { Ok(Json(ApiResult { code: 0, msg: None, data: Some(()) })) } 
-        Err(e) => { Ok(Json(ApiResult { code: -1, msg: Some(format!("{:?}", e)), data: None })) }
+impl IntoResponse for AppError {
+    fn into_response(self) -> axum::response::Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResult {
+                code: -1,
+                msg: Some(self.0.to_string()),
+                data: None::<()>,
+            }),
+        ).into_response()
+    }
+}
+
+impl From<anyhow::Error> for AppError {
+    fn from(err: anyhow::Error) -> Self {
+        Self(err)
     }
 }

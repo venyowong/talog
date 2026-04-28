@@ -1,23 +1,23 @@
 use std::collections::HashMap;
+use anyhow::anyhow;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
 use axum::{middleware, Json, Router};
 use axum::routing::{get};
 use talog_core::{LogModel, LogType};
 use crate::layers;
-use crate::models::ApiResult;
+use crate::models::{ApiResult, AppError};
 use crate::server::AppState;
 
 pub async fn search_logs(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>)
-    -> Result<Json<ApiResult<Vec<LogModel>>>, StatusCode> {
+    -> Result<Json<ApiResult<Vec<LogModel>>>, AppError> {
     let name = params.get("name")
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        .ok_or(anyhow!("missing name"))?;
     let expr = params.get("expr")
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        .ok_or(anyhow!("missing expr"))?;
     let log_type = params.get("log_type")
-        .ok_or(StatusCode::BAD_REQUEST)?
+        .ok_or(anyhow!("missing log_type"))?
         .parse::<LogType>()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(anyhow::Error::msg)?;
     let result = state.service.search_logs(&log_type, name, expr).await;
     match result {
         Ok(result) => {
