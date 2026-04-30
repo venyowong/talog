@@ -58,8 +58,7 @@ content-type: application/json
           "is_tag": false,
           "typ": "String"
         }
-    ],
-    "mapping_time": 0
+    ]
 }
 
 ###
