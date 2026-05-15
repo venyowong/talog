@@ -243,6 +243,18 @@ impl Service {
         Ok(())
     }
 
+    /// search json logs by expr, please refer to [fexpr](https://github.com/mnaufalhilmym/fexpr) for expr rules
+    pub async fn search<T>(&self, expr: &str) -> Result<Vec<T>, anyhow::Error>
+    where
+        T : TalogIndex + 'static {
+        let logs = self.search_logs(&LogType::Json, T::index_name(), expr).await?;
+        Ok(logs.into_iter()
+            .filter_map(|x| serde_json::from_str::<T>(&x.log)
+                .map_err(|e| warn!("skip invalid json: {}", e))
+                .ok())
+            .collect())
+    }
+
     /// search logs by expr, please refer to [fexpr](https://github.com/mnaufalhilmym/fexpr) for expr rules
     pub async fn search_logs(&self, log_type: &LogType, name: &str, expr: &str) -> Result<Vec<LogModel>, anyhow::Error> {
         match self.get_mapping(log_type, name).await {
