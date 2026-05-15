@@ -42,11 +42,6 @@ async fn main() {
     info!("starting server on {}", &address);
     let listener = TcpListener::bind(address).await.unwrap();
     axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
-
-    let service = Service::new("data").await;
-    let indices = service.get_indices();
-    println!("{:#?}", indices);
-    drop(service);
     file::wait_for_done();
 }
 
