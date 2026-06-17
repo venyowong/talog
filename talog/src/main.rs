@@ -17,7 +17,7 @@ use tracing::level_filters::LevelFilter;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use talog_core::{file, Service};
+use talog_core::{file};
 use crate::layers::cors_layer;
 use crate::server::AppState;
 

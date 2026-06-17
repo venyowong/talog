@@ -60,7 +60,7 @@ pub async fn index_log_seq(State(state): State<AppState>, Json(requests): Json<V
             let mut count = 0;
             for request in &requests {
                 if let Err(e) = state.service.index_log_with_mapping(&mapping, &request.tags, request.parse_log, &request.log) {
-                    warn!("partial log({request:?}) index exception in index_log_seq")
+                    warn!("partial log({request:?}) index exception in index_log_seq: {e}")
                 } else {
                     count += 1;
                 }

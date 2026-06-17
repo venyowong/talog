@@ -56,7 +56,7 @@ impl Service {
                 mappings.into_iter().find(|x| x.name == name)
             }
             Err(e) => {
-                warn!("failed to get mappings of {log_type}");
+                warn!("failed to get mappings of {log_type}: {e}");
                 None
             }
         }
@@ -71,18 +71,22 @@ impl Service {
                 match log_type {
                     None => {
                         let mappings: Vec<IndexMapping> = index.get_all_logs(Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
-                            .iter().filter(|x| x.is_some())
-                            .map(|x| x.as_ref().unwrap())
-                            .cloned()
+                            .into_iter()
+                            .filter_map(|x| x)
+                            .into_grouping_map_by(|x| x.name.clone())
+                            .max_by_key(|_, x| x.mapping_time)
+                            .into_values()
                             .collect();
                         Ok(mappings)
                     }
                     Some(log_type) => {
                         let mappings: Vec<IndexMapping> = index.search_logs(&format!("log_type = '{log_type}'"),
                                                                             Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
-                            .iter().filter(|x| x.is_some())
-                            .map(|x| x.as_ref().unwrap())
-                            .cloned()
+                            .into_iter()
+                            .filter_map(|x| x)
+                            .into_grouping_map_by(|x| x.name.clone())
+                            .max_by_key(|_, x| x.mapping_time)
+                            .into_values()
                             .collect();
                         Ok(mappings)
                     }
@@ -322,12 +326,12 @@ impl Service {
         }
     }
 
-    fn get_map_read_guard(&self) -> Result<RwLockReadGuard<HashMap<String, Index>>, anyhow::Error> {
+    fn get_map_read_guard(&self) -> Result<RwLockReadGuard<'_, HashMap<String, Index>>, anyhow::Error> {
         Ok(self.index_map.read()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?)
     }
 
-    fn get_map_write_guard(&self) -> Result<RwLockWriteGuard<HashMap<String, Index>>, anyhow::Error> {
+    fn get_map_write_guard(&self) -> Result<RwLockWriteGuard<'_, HashMap<String, Index>>, anyhow::Error> {
         Ok(self.index_map.write()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?)
     }
@@ -352,7 +356,7 @@ impl Service {
         self.index_raw_logs(&mapping.name, &tags, &vec![log.to_string()])
     }
 
-    fn index_log_with_regex(&self, mapping: &IndexMapping, mut tags: &Vec<Tag>, log: &str) -> Result<(), anyhow::Error> {
+    fn index_log_with_regex(&self, mapping: &IndexMapping, tags: &Vec<Tag>, log: &str) -> Result<(), anyhow::Error> {
         let mut tags: Vec<Tag> = tags.iter().cloned().collect();
         let reg = Regex::new(mapping.log_regex
             .as_ref()
