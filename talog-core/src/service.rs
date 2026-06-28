@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use anyhow::anyhow;
 use chrono::Utc;
 use itertools::EitherOrBoth::{Both, Left, Right};
@@ -9,6 +8,7 @@ use log::{warn};
 use regex::{Regex};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::sync::{RwLock};
 use crate::{FieldMapping, Index, IndexMapping, LogType, Tag, TalogIndex, INDEX_MAPPING_INDEX_NAME};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -45,9 +45,9 @@ impl Service {
         service
     }
 
-    pub fn get_indices(&self) -> Option<Vec<String>> {
-        let guard = self.get_map_read_guard().ok()?;
-        Some(guard.keys().map(|x| x.to_string()).collect())
+    pub async fn get_indices(&self) -> Vec<String> {
+        let guard = self.index_map.read().await;
+        guard.keys().map(|x| x.to_string()).collect()
     }
 
     pub async fn get_mapping(&self, log_type: &LogType, name: &str) -> Option<IndexMapping> {
@@ -64,13 +64,13 @@ impl Service {
 
     /// get index mappings by log type(Json/Raw)
     pub async fn get_mappings(&self, log_type: &Option<LogType>) -> Result<Vec<IndexMapping>, anyhow::Error> {
-        let guard = self.get_map_read_guard()?;
+        let guard = self.index_map.read().await;
         match guard.get(INDEX_MAPPING_INDEX_NAME) {
             None => { Ok(Vec::new()) }
             Some(index) => {
                 match log_type {
                     None => {
-                        let mappings: Vec<IndexMapping> = index.get_all_logs(Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
+                        let mappings: Vec<IndexMapping> = index.get_all_logs(Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() })).await?
                             .into_iter()
                             .filter_map(|x| x)
                             .into_grouping_map_by(|x| x.name.clone())
@@ -81,7 +81,7 @@ impl Service {
                     }
                     Some(log_type) => {
                         let mappings: Vec<IndexMapping> = index.search_logs(&format!("log_type = '{log_type}'"),
-                                                                            Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() }))?
+                                                                            Box::new(|log, _| { serde_json::from_str::<IndexMapping>(log).ok() })).await?
                             .into_iter()
                             .filter_map(|x| x)
                             .into_grouping_map_by(|x| x.name.clone())
@@ -96,11 +96,11 @@ impl Service {
     }
 
     pub async fn get_tag_values(&self, name: &str, label: &str) -> Option<Vec<String>> {
-        let guard = self.get_map_read_guard().ok()?;
+        let guard = self.index_map.read().await;
         match guard.get(name) {
             None => { Some(vec!()) }
             Some(index) => {
-                index.get_tag_values(label)
+                index.get_tag_values(label).await
             }
         }
     }
@@ -126,15 +126,16 @@ impl Service {
     }
 
     /// save the json of instance as `Json log` based on mapping
-    pub fn index<T>(&self, t: &T) -> Result<(), anyhow::Error>
+    pub async fn index<T>(&self, t: &T) -> Result<(), anyhow::Error>
     where
         T : TalogIndex + 'static {
-        let mut guard = self.get_map_write_guard()?;
+        let mut guard = self.index_map.write().await;
         let index_name = T::index_name();
         let tags = Self::parse_tags::<T>(t);
         guard.entry(index_name.to_string())
             .or_insert_with(|| { Index::new(self.data_path.as_str(), index_name) })
             .push(&tags, &vec![serde_json::to_string(t)?])
+            .await
     }
 
     /// save log
@@ -142,7 +143,7 @@ impl Service {
                      parse: bool, log: &str) -> Result<(), anyhow::Error> {
         let mapping = self.get_mapping(log_type, name).await
             .ok_or(anyhow!("please maintain the mapping of {name} first"))?;
-        self.index_log_with_mapping(&mapping, tags, parse, log)
+        self.index_log_with_mapping(&mapping, tags, parse, log).await
     }
 
     /// save logs
@@ -159,25 +160,25 @@ impl Service {
             Ok(())
         } else {
             let logs = logs.iter().map(|x| escape_newline(x)).collect::<Vec<_>>();
-            self.index_raw_logs(name, tags, &logs)
+            self.index_raw_logs(name, tags, &logs).await
         }
     }
 
-    pub fn index_log_with_mapping(&self, mapping: &IndexMapping, tags: &Vec<Tag>, parse: bool, log: &str)
+    pub async fn index_log_with_mapping(&self, mapping: &IndexMapping, tags: &Vec<Tag>, parse: bool, log: &str)
         -> Result<(), anyhow::Error> {
         if parse {
             if mapping.log_type == LogType::Json {
-                return self.index_json_log(mapping, tags, log);
+                return self.index_json_log(mapping, tags, log).await;
             }
 
             if mapping.log_regex.is_some() {
                 let log = escape_newline(log);
-                return self.index_log_with_regex(mapping, tags, &log);
+                return self.index_log_with_regex(mapping, tags, &log).await;
             }
         }
 
         let log = escape_newline(log);
-        self.index_raw_logs(&mapping.name, tags, &vec![log])
+        self.index_raw_logs(&mapping.name, tags, &vec![log]).await
     }
 
     /// generate an index mapping relationship based on the reflection characteristics of the type
@@ -200,7 +201,7 @@ impl Service {
         T : TalogIndex + 'static {
         let mapping = Self::parse_mapping::<T>();
         if self.has_mapping_changed(&mapping).await? {
-            self.index(&mapping)?;
+            self.index(&mapping).await?;
         }
         Ok(())
     }
@@ -239,10 +240,10 @@ impl Service {
     }
 
     /// remove all bucket files of specified index but index file and index mapping
-    pub fn remove_index(&self, name: &str) -> Result<(), anyhow::Error> {
-        let mut guard = self.get_map_write_guard()?;
+    pub async fn remove_index(&self, name: &str) -> Result<(), anyhow::Error> {
+        let mut guard = self.index_map.write().await;
         if let Some(index) = guard.remove(name) {
-            index.clean()?;
+            index.clean().await?;
         }
         Ok(())
     }
@@ -263,7 +264,7 @@ impl Service {
     pub async fn search_logs(&self, log_type: &LogType, name: &str, expr: &str) -> Result<Vec<LogModel>, anyhow::Error> {
         match self.get_mapping(log_type, name).await {
             Some(mapping) => {
-                let guard = self.get_map_read_guard()?;
+                let guard = self.index_map.read().await;
                 match guard.get(name) {
                     Some(index) => {
                         let result: Vec<LogModel> = match log_type {
@@ -272,7 +273,7 @@ impl Service {
                                     data: serde_json::from_str::<Value>(log).unwrap_or_default(),
                                     log: log.to_string(),
                                     tags: tags.to_vec()
-                                }}))?
+                                }})).await?
                             }
                             LogType::Raw => {
                                 match &mapping.log_regex {
@@ -281,7 +282,7 @@ impl Service {
                                             data: Value::Null,
                                             log: log.to_string(),
                                             tags: tags.to_vec()
-                                        }}))?
+                                        }})).await?
                                     }
                                     Some(log_regex) => {
                                         let reg = Regex::new(log_regex)?;
@@ -310,7 +311,7 @@ impl Service {
                                                     }
                                                 }
                                             }
-                                        }))?
+                                        })).await?
                                     }
                                 }
                             }
@@ -326,17 +327,7 @@ impl Service {
         }
     }
 
-    fn get_map_read_guard(&self) -> Result<RwLockReadGuard<'_, HashMap<String, Index>>, anyhow::Error> {
-        Ok(self.index_map.read()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?)
-    }
-
-    fn get_map_write_guard(&self) -> Result<RwLockWriteGuard<'_, HashMap<String, Index>>, anyhow::Error> {
-        Ok(self.index_map.write()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?)
-    }
-
-    fn index_json_log(&self, mapping: &IndexMapping, tags: &Vec<Tag>, log: &str) -> Result<(), anyhow::Error> {
+    async fn index_json_log(&self, mapping: &IndexMapping, tags: &Vec<Tag>, log: &str) -> Result<(), anyhow::Error> {
         let mut tags: Vec<Tag> = tags.iter().cloned().collect();
         let json: Value = serde_json::from_str(log)?;
         for field in mapping.fields.iter().filter(|x| x.is_tag) {
@@ -353,10 +344,10 @@ impl Service {
             }
         }
         
-        self.index_raw_logs(&mapping.name, &tags, &vec![log.to_string()])
+        self.index_raw_logs(&mapping.name, &tags, &vec![log.to_string()]).await
     }
 
-    fn index_log_with_regex(&self, mapping: &IndexMapping, tags: &Vec<Tag>, log: &str) -> Result<(), anyhow::Error> {
+    async fn index_log_with_regex(&self, mapping: &IndexMapping, tags: &Vec<Tag>, log: &str) -> Result<(), anyhow::Error> {
         let mut tags: Vec<Tag> = tags.iter().cloned().collect();
         let reg = Regex::new(mapping.log_regex
             .as_ref()
@@ -376,14 +367,15 @@ impl Service {
             }
         }
 
-        self.index_raw_logs(&mapping.name, &tags, &vec![log.to_string()])
+        self.index_raw_logs(&mapping.name, &tags, &vec![log.to_string()]).await
     }
 
-    fn index_raw_logs(&self, name: &str, tags: &Vec<Tag>, logs: &Vec<String>) -> Result<(), anyhow::Error> {
-        let mut guard = self.get_map_write_guard()?;
+    async fn index_raw_logs(&self, name: &str, tags: &Vec<Tag>, logs: &Vec<String>) -> Result<(), anyhow::Error> {
+        let mut guard = self.index_map.write().await;
         guard.entry(name.to_string())
             .or_insert_with(|| Index::new(&self.data_path, name))
-            .push(&tags, logs)?;
+            .push(&tags, logs)
+            .await?;
         Ok(())
     }
 }

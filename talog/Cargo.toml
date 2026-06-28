@@ -1,6 +1,6 @@
 [package]
 name = "talog"
-version = "0.1.1"
+version = "0.1.3"
 edition = "2024"
 
 [dependencies]
@@ -11,7 +11,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = [] }
 tracing-appender = "0.2.4"
 log = "0.4.29"
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["json", "query", "macros"] }
 chrono = "0.4.44"
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 serde = { version = "1.0.228", features = ["derive"] }

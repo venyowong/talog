@@ -8,6 +8,7 @@ use crate::layers;
 use crate::models::{ApiResult, AppError};
 use crate::server::AppState;
 
+#[axum::debug_handler]
 pub async fn search_logs(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>)
     -> Result<Json<ApiResult<Vec<LogModel>>>, AppError> {
     let name = params.get("name")

@@ -12,8 +12,7 @@ use crate::server::AppState;
 
 pub async fn get_mappings(State(state): State<AppState>) -> Result<Json<ApiResult<Vec<IndexMapping>>>, AppError> {
     let mappings = state.service.get_mappings(&None).await?;
-    let indices = state.service.get_indices()
-        .ok_or(anyhow!("no index mappings found"))?;
+    let indices = state.service.get_indices().await;
     let mappings: Vec<IndexMapping> = mappings.into_iter()
         .filter(|x| indices.contains(&x.name))
         .collect();
@@ -59,7 +58,7 @@ pub async fn index_log_seq(State(state): State<AppState>, Json(requests): Json<V
         Some(mapping) => {
             let mut count = 0;
             for request in &requests {
-                if let Err(e) = state.service.index_log_with_mapping(&mapping, &request.tags, request.parse_log, &request.log) {
+                if let Err(e) = state.service.index_log_with_mapping(&mapping, &request.tags, request.parse_log, &request.log).await {
                     warn!("partial log({request:?}) index exception in index_log_seq: {e}")
                 } else {
                     count += 1;
@@ -91,14 +90,14 @@ pub async fn mapping(State(state): State<AppState>, Json(mut mapping): Json<Inde
     }
 
     mapping.mapping_time = Utc::now().timestamp();
-    state.service.index(&mapping)?;
+    state.service.index(&mapping).await?;
     Ok(Json(ApiResult { code: 0, msg: None, data: Some(()) }))
 }
 
 pub async fn remove(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>) -> Result<Json<ApiResult<()>>, AppError> {
     let name = params.get("name")
         .ok_or(anyhow!("no name parameter"))?;
-    state.service.remove_index(name)?;
+    state.service.remove_index(name).await?;
     Ok(Json(ApiResult { code: 0, msg: None, data: Some(()) }))
 }
 
